@@ -647,7 +647,32 @@ function toCloud(wf) {
   return { ...JSON.parse(s), name: wf.name + (prefix ? ` (${prefix.replace(/-$/, '')})` : '') };
 }
 
-for (const [file, wf] of [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup]]) {
+// ---------- --single: all four flows in one workflow ----------
+// For instances that cap the number of published workflows. n8n allows many triggers per
+// workflow; node names must be unique, so names used by more than one flow get a suffix.
+function mergeAll(parts) {
+  const count = {};
+  for (const [, wf] of parts) for (const n of wf.nodes) count[n.name] = (count[n.name] || 0) + 1;
+  const merged = { id: 'SiteAgentAll0001', name: 'SiteAgent (all flows)', nodes: [], connections: {}, settings: { executionOrder: 'v1' }, pinData: {}, active: false };
+  parts.forEach(([tag, wf], i) => {
+    let s = JSON.stringify({ nodes: wf.nodes, connections: wf.connections });
+    for (const name of Object.keys(count).filter((k) => count[k] > 1)) {
+      const renamed = `${name} (${tag})`;
+      s = s.split(JSON.stringify(name)).join(JSON.stringify(renamed)).split(`$('${name}')`).join(`$('${renamed}')`);
+    }
+    const { nodes, connections } = JSON.parse(s);
+    for (const n of nodes) n.position = [n.position[0], n.position[1] + i * 1300];
+    merged.nodes.push(...nodes);
+    Object.assign(merged.connections, connections);
+  });
+  return merged;
+}
+
+const parts = [['Chat', chat], ['Leads', leads], ['Deals', proposals], ['Setup', setup]];
+const files = args.single
+  ? [['siteagent-all-in-one.json', mergeAll(parts)]]
+  : [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup]];
+for (const [file, wf] of files) {
   const out = CLOUD ? toCloud(wf) : wf;
   writeFileSync(join(OUT, file), JSON.stringify(out, null, 2) + '\n');
   console.log('wrote', join(CLOUD ? 'workflows-cloud' : 'workflows', file), `(${out.nodes.length} nodes)`);

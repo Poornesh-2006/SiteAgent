@@ -27,6 +27,8 @@ node tools/build-workflows.mjs --cloud --base-url=https://YOUR-N8N-HOST --from=y
 
 This writes 4 files to `workflows-cloud/`. Optional flags: `--tz=Asia/Kolkata`, `--pdf-url=https://your-gotenberg/forms/chromium/convert/html`.
 
+**Limited publish slots?** (e.g. "Publish 0/3"): add `--single` to get one `siteagent-all-in-one.json` with all four flows. That's one import and one publish. In step 5, import just that file.
+
 ## 4. Create 3 credentials in n8n
 Go to **Overview → Credentials → Create**:
 
