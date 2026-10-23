@@ -181,8 +181,11 @@ const chat = workflow('SiteAgentChat001', 'SiteAgent 1 - Chat Agent', [
   },
   gemini('Gemini', [340, 240], 0.3),
   {
-    id: id(), name: 'Chat Memory', type: '@n8n/n8n-nodes-langchain.memoryBufferWindow', typeVersion: 1.3, position: [500, 240],
-    parameters: { sessionIdType: 'customKey', sessionKey: `={{ ${TRIGGER}.sessionId }}`, contextWindowLength: 20 },
+    // Postgres memory, not in-process memory: hosted n8n runs several workers, and in-process
+    // memory forgets the conversation whenever a message lands on a different one.
+    id: id(), name: 'Chat Memory', type: '@n8n/n8n-nodes-langchain.memoryPostgresChat', typeVersion: 1.3, position: [500, 240],
+    parameters: { sessionIdType: 'customKey', sessionKey: `={{ 'chat:' + ${TRIGGER}.sessionId }}`, tableName: 'n8n_chat_histories', contextWindowLength: 20 },
+    credentials: CRED.postgres,
   },
   {
     id: id(), name: 'capture_lead', type: 'n8n-nodes-base.httpRequestTool', typeVersion: 4.2, position: [660, 240],
@@ -892,8 +895,9 @@ SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key
   },
   gemini('Gemini Setup', [140, 880], 0.2),
   {
-    id: id(), name: 'Setup Memory', type: '@n8n/n8n-nodes-langchain.memoryBufferWindow', typeVersion: 1.3, position: [300, 880],
-    parameters: { sessionIdType: 'customKey', sessionKey: `={{ ${SETUP_TRIGGER}.sessionId }}`, contextWindowLength: 30 },
+    id: id(), name: 'Setup Memory', type: '@n8n/n8n-nodes-langchain.memoryPostgresChat', typeVersion: 1.3, position: [300, 880],
+    parameters: { sessionIdType: 'customKey', sessionKey: `={{ 'setup:' + ${SETUP_TRIGGER}.sessionId }}`, tableName: 'n8n_chat_histories', contextWindowLength: 30 },
+    credentials: CRED.postgres,
   },
   {
     id: id(), name: 'create_assistant', type: 'n8n-nodes-base.httpRequestTool', typeVersion: 4.2, position: [460, 880],

@@ -63,7 +63,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000085",
       "name": "Setup Memory",
-      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
       "typeVersion": 1.3,
       "position": [
         300,
@@ -71,8 +71,15 @@
       ],
       "parameters": {
         "sessionIdType": "customKey",
-        "sessionKey": "={{ $('Setup Chat').first().json.sessionId }}",
+        "sessionKey": "={{ 'setup:' + $('Setup Chat').first().json.sessionId }}",
+        "tableName": "n8n_chat_histories",
         "contextWindowLength": 30
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
       }
     },
     {

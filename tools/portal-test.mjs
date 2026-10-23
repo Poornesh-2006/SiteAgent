@@ -27,6 +27,7 @@ execFileSync('node', [join(root, 'tools', 'build-workflows.mjs'), '--cloud', '--
 
 const CREDS = {
   postgres: { postgres: { id: 'SiteAgentPg00001', name: 'SiteAgent Postgres' } },
+  memoryPostgresChat: { postgres: { id: 'SiteAgentPg00001', name: 'SiteAgent Postgres' } },
   emailSend: { smtp: { id: 'SiteAgentSmtp001', name: 'SiteAgent SMTP' } },
   lmChatGroq: { groqApi: { id: 'SiteAgentGroq001', name: 'SiteAgent Groq' } },
   lmChatGoogleGemini: { googlePalmApi: { id: 'SiteAgentGemini1', name: 'SiteAgent Gemini' } },

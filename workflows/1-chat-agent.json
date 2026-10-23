@@ -87,7 +87,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000005",
       "name": "Chat Memory",
-      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
       "typeVersion": 1.3,
       "position": [
         500,
@@ -95,8 +95,15 @@
       ],
       "parameters": {
         "sessionIdType": "customKey",
-        "sessionKey": "={{ $('When chat message received').first().json.sessionId }}",
+        "sessionKey": "={{ 'chat:' + $('When chat message received').first().json.sessionId }}",
+        "tableName": "n8n_chat_histories",
         "contextWindowLength": 20
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
       }
     },
     {

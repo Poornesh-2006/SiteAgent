@@ -64,6 +64,15 @@ CREATE TABLE knowledge_drafts (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Conversation memory for the chat agents (n8n Postgres Chat Memory). Kept in the database so it
+-- works when n8n runs several worker processes; in-process memory would forget between messages.
+CREATE TABLE n8n_chat_histories (
+  id          SERIAL PRIMARY KEY,
+  session_id  VARCHAR(255) NOT NULL,
+  message     JSONB NOT NULL
+);
+CREATE INDEX n8n_chat_histories_session ON n8n_chat_histories (session_id);
+
 -- Demo business used by the sample website (site/index.html)
 INSERT INTO businesses (id, name, owner_email, knowledge, edit_key) VALUES (
   'pixelcraft',
@@ -110,3 +119,4 @@ ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE n8n_chat_histories ENABLE ROW LEVEL SECURITY;
