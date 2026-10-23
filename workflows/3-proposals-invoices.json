@@ -1,0 +1,902 @@
+{
+  "id": "SiteAgentDeals01",
+  "name": "SiteAgent 3 - Proposals & Invoices",
+  "nodes": [
+    {
+      "id": "00000000-0000-4000-8000-000000000026",
+      "name": "Proposal Form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "siteagent-proposal-form",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "proposal-form",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000027",
+      "name": "Load Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT l.*, b.name AS business_name, b.currency FROM leads l JOIN businesses b ON b.id = l.business_id\nWHERE l.id = $1 AND l.token = $2",
+        "options": {
+          "queryReplacement": "={{ [ Number($json.query.lead) || 0, String($json.query.k || '') ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000028",
+      "name": "Render Form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const page = (title, inner) => `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title>\r\n<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f7;color:#1f2330;margin:0;padding:32px 16px}\r\n.card{max-width:640px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px}\r\nh1{font-size:22px;margin:0 0 6px}p.muted{color:#6b7080;margin:0 0 20px}label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}\r\ninput,textarea,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d6d8e0;border-radius:8px;font:inherit}\r\ntextarea{min-height:110px}.row{display:flex;gap:12px}.row>div{flex:1}\r\nbutton{margin-top:22px;width:100%;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:600;cursor:pointer}\r\n.lead{background:#f6f6fb;border-radius:10px;padding:14px;font-size:14px;line-height:1.6}.big{font-size:56px;text-align:center;margin:0}\r\n.center{text-align:center}</style></head><body><div class=\"card\">${inner}</div></body></html>`;\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const message = (emoji, title, text) => page(title, `<p class=\"big\">${emoji}</p><h1 class=\"center\">${esc(title)}</h1><p class=\"muted center\">${esc(text)}</p>`);\r\n\n\r\nconst l = $input.first().json;\r\nif (!l.id) return [{ json: { html: message('🔒', 'Link not valid', 'This proposal link is invalid or has expired.') } }];\r\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\r\nconst already = l.status !== 'new'\r\n  ? `<p style=\"background:#fff7e0;padding:10px;border-radius:8px\">⚠️ A proposal was already sent for this lead (status: ${esc(l.status)}). Submitting again sends a new one.</p>` : '';\r\nconst html = page('Create proposal', `<h1>Create proposal</h1><p class=\"muted\">${esc(l.business_name)} · Lead #${l.id}</p>${already}\r\n<div class=\"lead\"><b>${esc(l.name)}</b> · ${esc(l.email)}${l.phone ? ' · ' + esc(l.phone) : ''}<br>\r\n<b>Needs:</b> ${esc(l.requirement)}<br><b>Budget/timeline:</b> ${esc(l.budget || '—')}<br>\r\n<b>AI score:</b> ${l.score}/100 (${esc(l.tier)}) — ${esc(l.reason)}</div>\r\n<form method=\"POST\" action=\"${base}/webhook/proposal-submit\">\r\n<input type=\"hidden\" name=\"lead\" value=\"${l.id}\"><input type=\"hidden\" name=\"k\" value=\"${esc(l.token)}\">\r\n<label>Title</label><input name=\"title\" required value=\"${esc(l.suggested_service !== 'Custom / unclear' ? l.suggested_service : '')}\">\r\n<label>Scope of work</label><textarea name=\"scope\" required>${esc(l.requirement)}</textarea>\r\n<div class=\"row\"><div><label>Unit price (${esc(l.currency)})</label><input name=\"unit_price\" type=\"number\" min=\"1\" step=\"0.01\" required></div>\r\n<div><label>Quantity</label><input name=\"quantity\" type=\"number\" min=\"1\" step=\"1\" value=\"1\" required></div>\r\n<div><label>GST %</label><input name=\"tax_rate\" type=\"number\" min=\"0\" max=\"28\" step=\"0.01\" value=\"18\" required></div></div>\r\n<label>Payment terms</label><select name=\"terms\">\r\n<option value=\"15|50% advance, balance on delivery (invoice due in 15 days)\">50% advance, balance on delivery</option>\r\n<option value=\"0|Due on receipt\">Due on receipt</option>\r\n<option value=\"7|Net 7\">Net 7</option><option value=\"15|Net 15\" selected>Net 15</option><option value=\"30|Net 30\">Net 30</option></select>\r\n<button type=\"submit\">Generate PDF &amp; send to ${esc(l.name.split(' ')[0])}</button></form>`);\r\nreturn [{ json: { html } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000029",
+      "name": "Show Form",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000030",
+      "name": "Proposal Submit",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "siteagent-proposal-submit",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proposal-submit",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000031",
+      "name": "Validate Proposal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst num = (v) => Number(String(v ?? '').replace(/,/g, ''));\r\nconst unit_price = num(b.unit_price), quantity = Math.round(num(b.quantity)), tax_rate = num(b.tax_rate);\r\nconst [due, ...termsParts] = String(b.terms || '15|Net 15').split('|');\r\nconst subtotal = Math.round(unit_price * quantity * 100) / 100;\r\nconst tax = Math.round(subtotal * tax_rate) / 100;\r\nconst out = {\r\n  lead: Number(b.lead) || 0, k: String(b.k || ''),\r\n  title: String(b.title || '').trim(), scope: String(b.scope || '').trim(),\r\n  unit_price, quantity, tax_rate, subtotal, tax, total: Math.round((subtotal + tax) * 100) / 100,\r\n  payment_terms: termsParts.join('|') || 'Net 15', due_days: Math.max(0, Number(due) || 0),\r\n};\r\nconst ok = out.lead > 0 && out.title && out.scope && unit_price > 0 && quantity > 0 && tax_rate >= 0 && tax_rate <= 100;\r\nreturn [{ json: { ...out, valid: !!ok, error: ok ? '' : 'Please fill in every field with valid numbers.' } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000032",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000033",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000034",
+      "name": "Save Proposal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        220
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH l AS (SELECT * FROM leads WHERE id = $1 AND token = $2),\np AS (\n  INSERT INTO proposals (lead_id, title, scope, unit_price, quantity, tax_rate, subtotal, tax, total, payment_terms, due_days)\n  SELECT l.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM l\n  RETURNING *\n),\nu AS (UPDATE leads SET status = 'proposal_sent' WHERE id IN (SELECT lead_id FROM p) AND status = 'new')\nSELECT p.*, l.name AS client_name, l.email AS client_email, b.name AS business_name, b.owner_email, b.currency\nFROM p JOIN l ON l.id = p.lead_id JOIN businesses b ON b.id = l.business_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.lead, $json.k, $json.title, $json.scope, $json.unit_price, $json.quantity, $json.tax_rate, $json.subtotal, $json.tax, $json.total, $json.payment_terms, $json.due_days ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000035",
+      "name": "Saved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000036",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000037",
+      "name": "Build Proposal PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        140
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const fmt = (n, cur) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur || 'INR' }).format(Number(n));\r\n  // Plain 'YYYY-MM-DD' dates are pinned to midday UTC so no timezone can shift them a day.\r\n  const d = (x) => new Date(/^\\d{4}-\\d{2}-\\d{2}$/.test(x) ? x + 'T12:00:00Z' : x)\r\n.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: $env.GENERIC_TIMEZONE || 'UTC' });\r\n  const doc = (kind, number, j, metaRows, footer) => `<!doctype html><html><head><meta charset=\"utf-8\"><style>\r\n@page{size:A4;margin:0}body{font-family:Helvetica,Arial,sans-serif;color:#1f2330;margin:0;padding:48px 52px;font-size:13px}\r\n.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #4f46e5;padding-bottom:18px}\r\n.brand{font-size:24px;font-weight:700}.kind{font-size:30px;font-weight:700;color:#4f46e5;text-align:right}.num{text-align:right;color:#6b7080}\r\n.cols{display:flex;justify-content:space-between;margin:26px 0}.cols h4{margin:0 0 6px;color:#6b7080;font-size:11px;text-transform:uppercase;letter-spacing:.06em}\r\ntable{width:100%;border-collapse:collapse;margin-top:8px}th{background:#4f46e5;color:#fff;text-align:left;padding:10px;font-size:12px}\r\ntd{padding:10px;border-bottom:1px solid #e6e7ee;vertical-align:top}.r{text-align:right}\r\n.totals{width:280px;margin-left:auto;margin-top:14px}.totals td{border:0;padding:6px 10px}.grand td{font-size:16px;font-weight:700;border-top:2px solid #1f2330}\r\n.scope{white-space:pre-wrap;color:#444;margin-top:4px}.foot{margin-top:40px;padding:16px;background:#f6f6fb;border-radius:8px;line-height:1.6}\r\n</style></head><body>\r\n<div class=\"top\"><div class=\"brand\">${esc(j.business_name)}</div><div><div class=\"kind\">${kind}</div><div class=\"num\">${number}</div></div></div>\r\n<div class=\"cols\"><div><h4>Billed to</h4><b>${esc(j.client_name)}</b><br>${esc(j.client_email)}</div>\r\n<div style=\"text-align:right\"><h4>Details</h4>${metaRows}</div></div>\r\n<table><tr><th>Description</th><th class=\"r\">Unit price</th><th class=\"r\">Qty</th><th class=\"r\">Amount</th></tr>\r\n<tr><td><b>${esc(j.title)}</b><div class=\"scope\">${esc(j.scope)}</div></td><td class=\"r\">${fmt(j.unit_price, j.currency)}</td><td class=\"r\">${j.quantity}</td><td class=\"r\">${fmt(j.subtotal, j.currency)}</td></tr></table>\r\n<table class=\"totals\"><tr><td>Subtotal</td><td class=\"r\">${fmt(j.subtotal, j.currency)}</td></tr>\r\n<tr><td>GST (${Number(j.tax_rate)}%)</td><td class=\"r\">${fmt(j.tax, j.currency)}</td></tr>\r\n<tr class=\"grand\"><td>Total</td><td class=\"r\">${fmt(j.total, j.currency)}</td></tr></table>\r\n<div class=\"foot\">${footer}</div></body></html>`;\r\n  const asHtmlFile = (html) => ({ data: { data: Buffer.from(html).toString('base64'), mimeType: 'text/html', fileName: 'index.html', fileExtension: 'html' } });\r\n\n\r\nconst j = $input.first().json;\r\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\r\nconst number = 'P-' + String(j.id).padStart(5, '0');\r\nconst valid = new Date(new Date(j.created_at).getTime() + 15 * 864e5);\r\nconst accept_link = `${base}/webhook/accept-proposal?t=${j.token}`;\r\nconst html = doc('PROPOSAL', number, j,\r\n  `Date: ${d(j.created_at)}<br>Valid until: ${d(valid)}<br>Terms: ${esc(j.payment_terms)}`,\r\n  `<b>Next step:</b> to accept this proposal, click the <b>Accept proposal</b> button in the email it came with. Your invoice will be issued automatically.<br>Questions? Reply to the email and we'll get back to you.`);\r\nreturn [{ json: { ...j, number, accept_link, total_fmt: fmt(j.total, j.currency), first_name: j.client_name.split(' ')[0] }, binary: asHtmlFile(html) }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000038",
+      "name": "Proposal → PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "printBackground",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000039",
+      "name": "Attach Proposal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        140
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst j = $('Build Proposal PDF').first().json;\r\nconst bin = $input.first().binary.data;\r\nbin.fileName = `Proposal-${j.number}.pdf`;\r\nbin.mimeType = 'application/pdf';\r\nreturn [{ json: j, binary: { data: bin } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000040",
+      "name": "Email Proposal",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        140
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.business_name }} <{{ $env.SITEAGENT_FROM_EMAIL }}>",
+        "toEmail": "={{ $json.client_email }}",
+        "subject": "=Your proposal from {{ $json.business_name }} — {{ $json.title }} ({{ $json.number }})",
+        "emailFormat": "html",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:560px;line-height:1.5\">\n<p>Hi {{ $json.first_name }},</p>\n<p>Thanks for your time! Please find our proposal for <b>{{ $json.title }}</b> attached.</p>\n<p style=\"font-size:18px\"><b>Total: {{ $json.total_fmt }}</b> <span style=\"color:#666;font-size:14px\">(incl. GST · {{ $json.payment_terms }})</span></p>\n<p style=\"margin:24px 0\"><a href=\"{{ $json.accept_link }}\" style=\"background:#16a34a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold\">✓ Accept proposal</a></p>\n<p>Accepting will automatically issue your invoice. Have questions or want changes? Just reply to this email.</p>\n<p>Best regards,<br>{{ $json.business_name }}</p></div>",
+        "options": {
+          "replyTo": "={{ $json.owner_email }}",
+          "ccEmail": "={{ $json.owner_email }}",
+          "attachments": "data"
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SiteAgentSmtp001",
+          "name": "SiteAgent SMTP"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000041",
+      "name": "Sent Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        140
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const page = (title, inner) => `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title>\r\n<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f7;color:#1f2330;margin:0;padding:32px 16px}\r\n.card{max-width:640px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px}\r\nh1{font-size:22px;margin:0 0 6px}p.muted{color:#6b7080;margin:0 0 20px}label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}\r\ninput,textarea,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d6d8e0;border-radius:8px;font:inherit}\r\ntextarea{min-height:110px}.row{display:flex;gap:12px}.row>div{flex:1}\r\nbutton{margin-top:22px;width:100%;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:600;cursor:pointer}\r\n.lead{background:#f6f6fb;border-radius:10px;padding:14px;font-size:14px;line-height:1.6}.big{font-size:56px;text-align:center;margin:0}\r\n.center{text-align:center}</style></head><body><div class=\"card\">${inner}</div></body></html>`;\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const message = (emoji, title, text) => page(title, `<p class=\"big\">${emoji}</p><h1 class=\"center\">${esc(title)}</h1><p class=\"muted center\">${esc(text)}</p>`);\r\n\n\r\nconst j = $('Build Proposal PDF').first().json;\r\nreturn [{ json: { html: message('📨', 'Proposal sent', `${j.number} (${j.total_fmt}) was emailed to ${j.client_email} with an Accept button. You were CC'd.`) } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000042",
+      "name": "Show Sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        140
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000043",
+      "name": "Error Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        400
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const page = (title, inner) => `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title>\r\n<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f7;color:#1f2330;margin:0;padding:32px 16px}\r\n.card{max-width:640px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px}\r\nh1{font-size:22px;margin:0 0 6px}p.muted{color:#6b7080;margin:0 0 20px}label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}\r\ninput,textarea,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d6d8e0;border-radius:8px;font:inherit}\r\ntextarea{min-height:110px}.row{display:flex;gap:12px}.row>div{flex:1}\r\nbutton{margin-top:22px;width:100%;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:600;cursor:pointer}\r\n.lead{background:#f6f6fb;border-radius:10px;padding:14px;font-size:14px;line-height:1.6}.big{font-size:56px;text-align:center;margin:0}\r\n.center{text-align:center}</style></head><body><div class=\"card\">${inner}</div></body></html>`;\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const message = (emoji, title, text) => page(title, `<p class=\"big\">${emoji}</p><h1 class=\"center\">${esc(title)}</h1><p class=\"muted center\">${esc(text)}</p>`);\r\n\n\r\nconst err = $('Validate Proposal').first().json.error || 'This proposal link is invalid.';\r\nreturn [{ json: { html: message('⚠️', 'Could not create proposal', err) } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000044",
+      "name": "Show Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        400
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000045",
+      "name": "Accept Proposal",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        700
+      ],
+      "webhookId": "siteagent-accept-proposal",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "accept-proposal",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000046",
+      "name": "Mark Accepted + Create Invoice",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        700
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (\n  UPDATE proposals SET status = 'accepted', accepted_at = now()\n  WHERE token = $1 AND status = 'sent' RETURNING *\n),\ni AS (\n  INSERT INTO invoices (proposal_id, amount, due_date)\n  SELECT id, total, CURRENT_DATE + due_days FROM p RETURNING *\n),\nu AS (UPDATE leads SET status = 'won' WHERE id IN (SELECT lead_id FROM p))\nSELECT i.id AS invoice_id, to_char(i.due_date, 'YYYY-MM-DD') AS due_date, i.created_at AS invoice_date, p.*,\n       l.name AS client_name, l.email AS client_email, b.name AS business_name, b.owner_email, b.currency\nFROM i JOIN p ON p.id = i.proposal_id JOIN leads l ON l.id = p.lead_id JOIN businesses b ON b.id = l.business_id",
+        "options": {
+          "queryReplacement": "={{ [ String($json.query.t || '') ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000047",
+      "name": "Accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000048",
+              "leftValue": "={{ !!$json.invoice_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000049",
+      "name": "Build Invoice PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        620
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const fmt = (n, cur) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur || 'INR' }).format(Number(n));\r\n  // Plain 'YYYY-MM-DD' dates are pinned to midday UTC so no timezone can shift them a day.\r\n  const d = (x) => new Date(/^\\d{4}-\\d{2}-\\d{2}$/.test(x) ? x + 'T12:00:00Z' : x)\r\n.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: $env.GENERIC_TIMEZONE || 'UTC' });\r\n  const doc = (kind, number, j, metaRows, footer) => `<!doctype html><html><head><meta charset=\"utf-8\"><style>\r\n@page{size:A4;margin:0}body{font-family:Helvetica,Arial,sans-serif;color:#1f2330;margin:0;padding:48px 52px;font-size:13px}\r\n.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #4f46e5;padding-bottom:18px}\r\n.brand{font-size:24px;font-weight:700}.kind{font-size:30px;font-weight:700;color:#4f46e5;text-align:right}.num{text-align:right;color:#6b7080}\r\n.cols{display:flex;justify-content:space-between;margin:26px 0}.cols h4{margin:0 0 6px;color:#6b7080;font-size:11px;text-transform:uppercase;letter-spacing:.06em}\r\ntable{width:100%;border-collapse:collapse;margin-top:8px}th{background:#4f46e5;color:#fff;text-align:left;padding:10px;font-size:12px}\r\ntd{padding:10px;border-bottom:1px solid #e6e7ee;vertical-align:top}.r{text-align:right}\r\n.totals{width:280px;margin-left:auto;margin-top:14px}.totals td{border:0;padding:6px 10px}.grand td{font-size:16px;font-weight:700;border-top:2px solid #1f2330}\r\n.scope{white-space:pre-wrap;color:#444;margin-top:4px}.foot{margin-top:40px;padding:16px;background:#f6f6fb;border-radius:8px;line-height:1.6}\r\n</style></head><body>\r\n<div class=\"top\"><div class=\"brand\">${esc(j.business_name)}</div><div><div class=\"kind\">${kind}</div><div class=\"num\">${number}</div></div></div>\r\n<div class=\"cols\"><div><h4>Billed to</h4><b>${esc(j.client_name)}</b><br>${esc(j.client_email)}</div>\r\n<div style=\"text-align:right\"><h4>Details</h4>${metaRows}</div></div>\r\n<table><tr><th>Description</th><th class=\"r\">Unit price</th><th class=\"r\">Qty</th><th class=\"r\">Amount</th></tr>\r\n<tr><td><b>${esc(j.title)}</b><div class=\"scope\">${esc(j.scope)}</div></td><td class=\"r\">${fmt(j.unit_price, j.currency)}</td><td class=\"r\">${j.quantity}</td><td class=\"r\">${fmt(j.subtotal, j.currency)}</td></tr></table>\r\n<table class=\"totals\"><tr><td>Subtotal</td><td class=\"r\">${fmt(j.subtotal, j.currency)}</td></tr>\r\n<tr><td>GST (${Number(j.tax_rate)}%)</td><td class=\"r\">${fmt(j.tax, j.currency)}</td></tr>\r\n<tr class=\"grand\"><td>Total</td><td class=\"r\">${fmt(j.total, j.currency)}</td></tr></table>\r\n<div class=\"foot\">${footer}</div></body></html>`;\r\n  const asHtmlFile = (html) => ({ data: { data: Buffer.from(html).toString('base64'), mimeType: 'text/html', fileName: 'index.html', fileExtension: 'html' } });\r\n\n\r\nconst j = $input.first().json;\r\nconst number = `INV-${new Date(j.invoice_date).getFullYear()}-${String(j.invoice_id).padStart(4, '0')}`;\r\nconst html = doc('INVOICE', number, j,\r\n  `Invoice date: ${d(j.invoice_date)}<br><b>Due date: ${d(j.due_date)}</b><br>Ref: P-${String(j.id).padStart(5, '0')}<br>Terms: ${esc(j.payment_terms)}`,\r\n  `<b>Payment due by ${d(j.due_date)}.</b> Please quote <b>${number}</b> with your payment. Reply to the invoice email for bank / UPI details or any questions.<br>Thank you for your business!`);\r\nreturn [{ json: { ...j, number, total_fmt: fmt(j.total, j.currency), due_fmt: d(j.due_date), first_name: j.client_name.split(' ')[0] }, binary: asHtmlFile(html) }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000050",
+      "name": "Invoice → PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        620
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "printBackground",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000051",
+      "name": "Attach Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        620
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst j = $('Build Invoice PDF').first().json;\r\nconst bin = $input.first().binary.data;\r\nbin.fileName = `Invoice-${j.number}.pdf`;\r\nbin.mimeType = 'application/pdf';\r\nreturn [{ json: j, binary: { data: bin } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000052",
+      "name": "Email Invoice",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        620
+      ],
+      "parameters": {
+        "fromEmail": "={{ $json.business_name }} <{{ $env.SITEAGENT_FROM_EMAIL }}>",
+        "toEmail": "={{ $json.client_email }}",
+        "subject": "=Invoice {{ $json.number }} from {{ $json.business_name }} — {{ $json.total_fmt }}",
+        "emailFormat": "html",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:560px;line-height:1.5\">\n<p>Hi {{ $json.first_name }},</p>\n<p>Thank you for accepting our proposal for <b>{{ $json.title }}</b> — we're excited to get started!</p>\n<p>Your invoice <b>{{ $json.number }}</b> for <b>{{ $json.total_fmt }}</b> is attached, due on <b>{{ $json.due_fmt }}</b>.</p>\n<p>Reply to this email for payment details or any questions.</p>\n<p>Best regards,<br>{{ $json.business_name }}</p></div>",
+        "options": {
+          "replyTo": "={{ $json.owner_email }}",
+          "ccEmail": "={{ $json.owner_email }}",
+          "attachments": "data"
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SiteAgentSmtp001",
+          "name": "SiteAgent SMTP"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000053",
+      "name": "Thank-You Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        620
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const page = (title, inner) => `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title>\r\n<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f7;color:#1f2330;margin:0;padding:32px 16px}\r\n.card{max-width:640px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px}\r\nh1{font-size:22px;margin:0 0 6px}p.muted{color:#6b7080;margin:0 0 20px}label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}\r\ninput,textarea,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d6d8e0;border-radius:8px;font:inherit}\r\ntextarea{min-height:110px}.row{display:flex;gap:12px}.row>div{flex:1}\r\nbutton{margin-top:22px;width:100%;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:600;cursor:pointer}\r\n.lead{background:#f6f6fb;border-radius:10px;padding:14px;font-size:14px;line-height:1.6}.big{font-size:56px;text-align:center;margin:0}\r\n.center{text-align:center}</style></head><body><div class=\"card\">${inner}</div></body></html>`;\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const message = (emoji, title, text) => page(title, `<p class=\"big\">${emoji}</p><h1 class=\"center\">${esc(title)}</h1><p class=\"muted center\">${esc(text)}</p>`);\r\n\n\r\nconst j = $('Build Invoice PDF').first().json;\r\nreturn [{ json: { html: message('🎉', 'Proposal accepted!', `Thanks ${j.first_name}! Invoice ${j.number} (${j.total_fmt}, due ${j.due_fmt}) has been emailed to ${j.client_email}.`) } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000054",
+      "name": "Show Thanks",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        620
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000055",
+      "name": "Not Found Page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        820
+      ],
+      "parameters": {
+        "jsCode": "\r\n  const page = (title, inner) => `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title>\r\n<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f4f7;color:#1f2330;margin:0;padding:32px 16px}\r\n.card{max-width:640px;margin:0 auto;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px}\r\nh1{font-size:22px;margin:0 0 6px}p.muted{color:#6b7080;margin:0 0 20px}label{display:block;font-weight:600;font-size:14px;margin:14px 0 6px}\r\ninput,textarea,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d6d8e0;border-radius:8px;font:inherit}\r\ntextarea{min-height:110px}.row{display:flex;gap:12px}.row>div{flex:1}\r\nbutton{margin-top:22px;width:100%;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:13px;font-size:16px;font-weight:600;cursor:pointer}\r\n.lead{background:#f6f6fb;border-radius:10px;padding:14px;font-size:14px;line-height:1.6}.big{font-size:56px;text-align:center;margin:0}\r\n.center{text-align:center}</style></head><body><div class=\"card\">${inner}</div></body></html>`;\r\n  const esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\r\n  const message = (emoji, title, text) => page(title, `<p class=\"big\">${emoji}</p><h1 class=\"center\">${esc(title)}</h1><p class=\"muted center\">${esc(text)}</p>`);\r\n\n\r\nreturn [{ json: { html: message('ℹ️', 'Nothing to accept', 'This proposal has already been accepted, or the link is invalid. Check your inbox for the invoice, or reply to the proposal email.') } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000056",
+      "name": "Show Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        820
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 404,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Proposal Form": {
+      "main": [
+        [
+          {
+            "node": "Load Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Lead": {
+      "main": [
+        [
+          {
+            "node": "Render Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Form": {
+      "main": [
+        [
+          {
+            "node": "Show Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proposal Submit": {
+      "main": [
+        [
+          {
+            "node": "Validate Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Proposal": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Proposal": {
+      "main": [
+        [
+          {
+            "node": "Saved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Saved?": {
+      "main": [
+        [
+          {
+            "node": "Build Proposal PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Proposal PDF": {
+      "main": [
+        [
+          {
+            "node": "Proposal → PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proposal → PDF": {
+      "main": [
+        [
+          {
+            "node": "Attach Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Proposal": {
+      "main": [
+        [
+          {
+            "node": "Email Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Proposal": {
+      "main": [
+        [
+          {
+            "node": "Sent Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sent Page": {
+      "main": [
+        [
+          {
+            "node": "Show Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Page": {
+      "main": [
+        [
+          {
+            "node": "Show Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept Proposal": {
+      "main": [
+        [
+          {
+            "node": "Mark Accepted + Create Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Accepted + Create Invoice": {
+      "main": [
+        [
+          {
+            "node": "Accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accepted?": {
+      "main": [
+        [
+          {
+            "node": "Build Invoice PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not Found Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Invoice PDF": {
+      "main": [
+        [
+          {
+            "node": "Invoice → PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice → PDF": {
+      "main": [
+        [
+          {
+            "node": "Attach Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Invoice": {
+      "main": [
+        [
+          {
+            "node": "Email Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Invoice": {
+      "main": [
+        [
+          {
+            "node": "Thank-You Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Thank-You Page": {
+      "main": [
+        [
+          {
+            "node": "Show Thanks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not Found Page": {
+      "main": [
+        [
+          {
+            "node": "Show Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

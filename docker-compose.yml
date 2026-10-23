@@ -1,0 +1,70 @@
+name: siteagent
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: siteagent-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${SITEAGENT_PUBLIC_URL:-http://localhost:5678}/
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Read by the workflows via $env
+      - SITEAGENT_PUBLIC_URL=${SITEAGENT_PUBLIC_URL:-http://localhost:5678}
+      - SITEAGENT_FROM_EMAIL=${SITEAGENT_FROM_EMAIL:-noreply@siteagent.local}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/import/workflows:ro
+      - ./credentials:/import/credentials:ro
+    depends_on:
+      - postgres
+      - gotenberg
+      - mailpit
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: siteagent-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=siteagent
+      - POSTGRES_PASSWORD=siteagent
+      - POSTGRES_DB=siteagent
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+  # HTML -> PDF for proposals and invoices
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: siteagent-gotenberg
+    restart: unless-stopped
+
+  # Catches every email locally: open http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: siteagent-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
+  # Demo website + setup page: open http://localhost:8080
+  site:
+    image: nginx:alpine
+    container_name: siteagent-site
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+
+volumes:
+  n8n_data:
+  pg_data:

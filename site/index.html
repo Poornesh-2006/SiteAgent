@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PixelCraft Studio</title>
+  <style>
+    :root { --ink:#1b1d29; --muted:#5d6275; --accent:#4f46e5; --bg:#fbfbfd; --card:#fff; --line:#e7e8ef; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); line-height:1.55; }
+    .wrap { max-width:1080px; margin:0 auto; padding:0 16px; }
+    nav { display:flex; justify-content:space-between; align-items:center; padding:20px 0; }
+    .logo { font-weight:800; font-size:20px; } .logo span { color:var(--accent); }
+    nav a { color:var(--muted); text-decoration:none; margin-left:20px; font-size:15px; }
+    .hero { padding:64px 0 48px; display:grid; gap:24px; }
+    .hero h1 { font-size:clamp(32px,5vw,52px); line-height:1.1; margin:0; max-width:760px; letter-spacing:-0.02em; }
+    .hero p { font-size:19px; color:var(--muted); max-width:620px; margin:0; }
+    .pill { display:inline-block; background:#eef; color:var(--accent); padding:6px 12px; border-radius:99px; font-size:13px; font-weight:600; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; padding:24px 0 56px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; }
+    .card h3 { margin:0 0 6px; font-size:18px; } .card p { margin:0 0 12px; color:var(--muted); font-size:15px; }
+    .price { font-weight:700; color:var(--accent); }
+    h2 { font-size:28px; margin:0; }
+    .steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; padding:20px 0 56px; counter-reset:s; }
+    .steps div { padding:18px; border-left:3px solid var(--accent); background:var(--card); border-radius:0 10px 10px 0; }
+    .hint { background:#1b1d29; color:#fff; border-radius:14px; padding:22px; margin-bottom:56px; }
+    .hint code { background:#ffffff1a; padding:2px 6px; border-radius:4px; }
+    footer { border-top:1px solid var(--line); padding:24px 0 96px; color:var(--muted); font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="logo">Pixel<span>Craft</span> Studio</div>
+      <div><a href="#services">Services</a><a href="#process">Process</a><a href="setup.html">SiteAgent setup →</a></div>
+    </nav>
+
+    <section class="hero">
+      <span class="pill">Demo website for SiteAgent</span>
+      <h1>Websites that bring you customers, not just compliments.</h1>
+      <p>We're a 6-person studio in Bengaluru building fast, beautiful websites, online stores and web apps since 2019. 140+ sites shipped.</p>
+    </section>
+
+    <h2 id="services">What we build</h2>
+    <div class="grid">
+      <div class="card"><h3>Business website</h3><p>Up to 5 pages, responsive, basic SEO. 2–3 weeks.</p><span class="price">From ₹25,000</span></div>
+      <div class="card"><h3>E-commerce store</h3><p>Shopify or WooCommerce, up to 50 products. 4–6 weeks.</p><span class="price">From ₹60,000</span></div>
+      <div class="card"><h3>Custom web app</h3><p>Dashboards, portals, booking systems, internal tools.</p><span class="price">From ₹1,50,000</span></div>
+      <div class="card"><h3>Maintenance</h3><p>Updates, backups, security, 2 hours of changes.</p><span class="price">₹3,000 / month</span></div>
+    </div>
+
+    <h2 id="process">How we work</h2>
+    <div class="steps">
+      <div><b>1. Discovery call</b><br>Free, 20 minutes.</div>
+      <div><b>2. Proposal</b><br>Within 48 hours.</div>
+      <div><b>3. Build</b><br>50% advance, two revision rounds.</div>
+      <div><b>4. Launch</b><br>Plus 30 days free support.</div>
+    </div>
+
+    <div class="hint">
+      <b>Try the assistant →</b> click the chat bubble in the bottom-right corner. Ask about prices, what's included, or something we <i>don't</i> offer (like mobile apps).
+      Then say you want a quote. Leads, proposals and invoices land in <a href="http://localhost:8025" style="color:#a5b4fc">Mailpit</a>.
+    </div>
+
+    <footer>© PixelCraft Studio · hello@pixelcraft.example · Mon–Sat, 10am–7pm IST</footer>
+  </div>
+
+  <script src="config.js"></script>
+  <script type="module" src="widget.js" data-business="pixelcraft" data-name="PixelCraft Studio"></script>
+</body>
+</html>

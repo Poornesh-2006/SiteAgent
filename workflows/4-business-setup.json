@@ -1,0 +1,361 @@
+{
+  "id": "SiteAgentSetup01",
+  "name": "SiteAgent 4 - Business Setup",
+  "nodes": [
+    {
+      "id": "00000000-0000-4000-8000-000000000057",
+      "name": "Save Business",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "siteagent-save-business",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "save-business",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000058",
+      "name": "Validate Business",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst s = (v) => String(v ?? '').trim();\r\nconst out = {\r\n  businessId: s(b.businessId), editKey: s(b.editKey),\r\n  name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),\r\n};\r\nout.mode = out.businessId ? 'update' : 'create';\r\nif (out.mode === 'create') {\r\n  const slug = out.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'biz';\r\n  out.businessId = `${slug}-${Math.random().toString(36).slice(2, 7)}`;\r\n}\r\nconst errors = [];\r\nif (out.name.length < 2) errors.push('Business name is required.');\r\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');\r\nif (out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');\r\nif (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');\r\nreturn [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000059",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000060",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000061",
+      "name": "Upsert Business",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        -80
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upd AS (\n  UPDATE businesses SET name = $2, owner_email = $3, knowledge = $4, updated_at = now()\n  WHERE $6 = 'update' AND id = $1 AND edit_key = $5 RETURNING *\n),\nins AS (\n  INSERT INTO businesses (id, name, owner_email, knowledge)\n  SELECT $1, $2, $3, $4 WHERE $6 = 'create' RETURNING *\n)\nSELECT id, name, edit_key FROM upd UNION ALL SELECT id, name, edit_key FROM ins",
+        "options": {
+          "queryReplacement": "={{ [ $json.businessId, $json.name, $json.ownerEmail, $json.knowledge, $json.editKey, $json.mode ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000062",
+      "name": "Saved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000063",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000064",
+      "name": "Build Snippet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "\nconst b = $input.first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nconst js = (v) => JSON.stringify(v);\nconst snippet = [\n  '<link href=\"https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/style.css\" rel=\"stylesheet\" />',\n  '<script type=\"module\">',\n  \"  import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/chat.bundle.es.js';\",\n  '  createChat({',\n  '    webhookUrl: ' + js(base + '/webhook/siteagent-chat/chat') + ',',\n  '    metadata: { businessId: ' + js(b.id) + ' },',\n  '    showWelcomeScreen: false,',\n  '    initialMessages: [' + js('Hi! 👋 Welcome to ' + b.name + '.') + ', ' + js('Ask me anything about our services, pricing or how we work.') + '],',\n  '    i18n: { en: { title: ' + js(b.name) + \", subtitle: 'Typically replies instantly', footer: '', getStarted: 'New conversation', inputPlaceholder: 'Type your question…' } },\",\n  '  });',\n  '</' + 'script>',\n].join('\\n');\nreturn [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, snippet } }];\n\n"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000065",
+      "name": "Respond Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        -160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000066",
+      "name": "Respond Not Saved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'Business not found or edit key is wrong.' }) }}",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000067",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000068",
+      "name": "Get Business",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        360
+      ],
+      "webhookId": "siteagent-get-business",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-business",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000069",
+      "name": "Load Business",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        360
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, owner_email, knowledge FROM businesses WHERE id = $1 AND edit_key = $2",
+        "options": {
+          "queryReplacement": "={{ [ String($json.query.id || ''), String($json.query.key || '') ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000070",
+      "name": "Respond Business",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        360
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.id ? { ok: true, business: $json } : { ok: false, error: 'Business not found or edit key is wrong.' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Save Business": {
+      "main": [
+        [
+          {
+            "node": "Validate Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Business": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Business",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Business": {
+      "main": [
+        [
+          {
+            "node": "Saved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Saved?": {
+      "main": [
+        [
+          {
+            "node": "Build Snippet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Snippet": {
+      "main": [
+        [
+          {
+            "node": "Respond Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Business": {
+      "main": [
+        [
+          {
+            "node": "Load Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Business": {
+      "main": [
+        [
+          {
+            "node": "Respond Business",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}
