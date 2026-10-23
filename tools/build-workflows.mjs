@@ -1,11 +1,25 @@
-// Generates the importable n8n workflow JSON files in ../workflows.
+// Generates the importable n8n workflow JSON files.
 // Code-node bodies are written as real JS functions below so they stay readable;
 // run `node tools/build-workflows.mjs` after editing.
+//
+// Local Docker stack (default):  node tools/build-workflows.mjs            -> workflows/
+// Hosted n8n (cloud / portal):   node tools/build-workflows.mjs --cloud \
+//     --base-url=https://your-n8n.example.com --from=you@gmail.com --prefix=poornesh-
+//                                                                          -> workflows-cloud/
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows');
+const args = Object.fromEntries(process.argv.slice(2).map((a) => {
+  const [k, ...v] = a.replace(/^--/, '').split('=');
+  return [k, v.length ? v.join('=') : true];
+}));
+const CLOUD = !!args.cloud;
+if (CLOUD && (!args['base-url'] || !args.from)) {
+  console.error('--cloud needs --base-url=https://your-n8n-host and --from=sender@email');
+  process.exit(1);
+}
+const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', CLOUD ? 'workflows-cloud' : 'workflows');
 mkdirSync(OUT, { recursive: true });
 
 const CHAT_VERSION = '1.41.3'; // @n8n/chat widget, pinned
@@ -14,7 +28,7 @@ const CRED = {
   smtp: { smtp: { id: 'SiteAgentSmtp001', name: 'SiteAgent SMTP' } },
   gemini: { googlePalmApi: { id: 'SiteAgentGemini1', name: 'SiteAgent Gemini' } },
 };
-const GEMINI_MODEL = 'models/gemini-2.5-flash';
+const GEMINI_MODEL = 'models/gemini-3.8-flash';
 
 // ---------- helpers ----------
 let uid = 0;
@@ -608,7 +622,36 @@ return [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name,
   ['Get Business', 'Load Business'], ['Load Business', 'Respond Business'],
 ]);
 
+// ---------- hosted-n8n variant ----------
+// A hosted n8n has no Docker siblings (postgres, gotenberg, mailpit), usually blocks $env,
+// and may be shared, so webhook paths get a personal prefix to avoid clashes.
+const PATHS = ['siteagent-chat', 'capture-lead', 'proposal-form', 'proposal-submit', 'accept-proposal', 'save-business', 'get-business'];
+function toCloud(wf) {
+  const base = String(args['base-url']).replace(/\/+$/, '');
+  const prefix = typeof args.prefix === 'string' ? args.prefix : '';
+  const tz = args.tz || 'Asia/Kolkata';
+  const pdfUrl = args['pdf-url'] || 'https://demo.gotenberg.dev/forms/chromium/convert/html';
+  for (const n of wf.nodes) {
+    delete n.credentials; // pick your own credentials in the n8n UI after import
+    if (n.type === 'n8n-nodes-base.webhook') n.parameters.path = prefix + n.parameters.path;
+    if (n.webhookId) n.webhookId = prefix + n.webhookId;
+  }
+  let s = JSON.stringify(wf, null, 2);
+  for (const p of PATHS) s = s.split(`/webhook/${p}`).join(`/webhook/${prefix}${p}`);
+  s = s.split('$env.SITEAGENT_PUBLIC_URL || ').join('')
+    .split('http://localhost:5678').join(base)
+    .split("$env.GENERIC_TIMEZONE || 'UTC'").join(`'${tz}'`)
+    .split('{{ $env.SITEAGENT_FROM_EMAIL }}').join(args.from)
+    .split('http://gotenberg:3000/forms/chromium/convert/html').join(pdfUrl);
+  if (/\$env|localhost|gotenberg:3000/.test(s)) throw new Error(`${wf.name}: local-only reference left in cloud build`);
+  return { ...JSON.parse(s), name: wf.name + (prefix ? ` (${prefix.replace(/-$/, '')})` : '') };
+}
+
 for (const [file, wf] of [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup]]) {
-  writeFileSync(join(OUT, file), JSON.stringify(wf, null, 2) + '\n');
-  console.log('wrote', file, `(${wf.nodes.length} nodes)`);
+  const out = CLOUD ? toCloud(wf) : wf;
+  writeFileSync(join(OUT, file), JSON.stringify(out, null, 2) + '\n');
+  console.log('wrote', join(CLOUD ? 'workflows-cloud' : 'workflows', file), `(${out.nodes.length} nodes)`);
+}
+if (CLOUD) {
+  console.log(`\nIn site/config.js set:  n8n: '${String(args['base-url']).replace(/\/+$/, '')}', prefix: '${args.prefix || ''}'`);
 }

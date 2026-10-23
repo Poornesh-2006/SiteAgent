@@ -58,6 +58,9 @@ Run the accuracy checks: `node tools/test-agent.mjs`
 | http://localhost:8080/setup.html | Create or edit a business assistant |
 | http://localhost:8025 | Mailpit, catches all outgoing email |
 
+### Using a hosted n8n instead (learning portal / n8n Cloud)
+See **[docs/HOSTED-N8N.md](docs/HOSTED-N8N.md)**: Supabase for the database, Gmail for email, and `node tools/build-workflows.mjs --cloud ...` to generate import-ready files.
+
 ## Project layout
 
 ```

@@ -60,13 +60,14 @@
 <script src="config.js"></script>
 <script>
   const N8N = window.SITEAGENT.n8n;
+  const P = window.SITEAGENT.prefix || '';
   const $ = (id) => document.getElementById(id);
   let current = { businessId: '', editKey: '' };
 
   function show(type, text) { const m = $('msg'); m.className = 'msg ' + type; m.textContent = text; }
 
   $('load').onclick = async () => {
-    const res = await fetch(`${N8N}/webhook/get-business?id=${encodeURIComponent($('lid').value.trim())}&key=${encodeURIComponent($('lkey').value.trim())}`);
+    const res = await fetch(`${N8N}/webhook/${P}get-business?id=${encodeURIComponent($('lid').value.trim())}&key=${encodeURIComponent($('lkey').value.trim())}`);
     const data = await res.json().catch(() => ({ ok: false, error: 'n8n is not reachable.' }));
     if (!data.ok) return show('err', data.error);
     current = { businessId: data.business.id, editKey: $('lkey').value.trim() };
@@ -81,7 +82,7 @@
     e.preventDefault();
     $('save').disabled = true;
     try {
-      const res = await fetch(`${N8N}/webhook/save-business`, {
+      const res = await fetch(`${N8N}/webhook/${P}save-business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...current, name: $('name').value, ownerEmail: $('owner').value, knowledge: $('kb').value }),
