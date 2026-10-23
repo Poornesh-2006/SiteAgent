@@ -932,6 +932,17 @@ SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key
   ['import_website', 'Setup Assistant', 'ai_tool'],
 ]);
 
+// n8n allows only one Chat Trigger per workflow, so the setup assistant always lives in its own
+// workflow (the main bot's chat trigger is in the Chat workflow / the all-in-one file).
+const ASSISTANT_NODES = new Set(['Setup Chat', 'Setup Assistant', 'Gemini Setup', 'Groq Setup', 'Setup Memory', 'create_assistant', 'import_website']);
+const assistant = {
+  ...setup, id: 'SiteAgentAsst001', name: 'SiteAgent 6 - Setup Assistant',
+  nodes: setup.nodes.filter((n) => ASSISTANT_NODES.has(n.name)),
+  connections: Object.fromEntries(Object.entries(setup.connections).filter(([from]) => ASSISTANT_NODES.has(from))),
+};
+setup.nodes = setup.nodes.filter((n) => !ASSISTANT_NODES.has(n.name));
+setup.connections = Object.fromEntries(Object.entries(setup.connections).filter(([from]) => !ASSISTANT_NODES.has(from)));
+
 // ---------- hosted-n8n variant ----------
 // A hosted n8n has no Docker siblings (postgres, gotenberg, mailpit), usually blocks $env,
 // and may be shared, so webhook paths get a personal prefix to avoid clashes.
@@ -980,8 +991,8 @@ function mergeAll(parts) {
 
 const parts = [['Chat', chat], ['Leads', leads], ['Deals', proposals], ['Setup', setup], ['Knowledge', knowledge]];
 const files = args.single
-  ? [['siteagent-all-in-one.json', mergeAll(parts)]]
-  : [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup], ['5-knowledge-builder.json', knowledge]];
+  ? [['siteagent-all-in-one.json', mergeAll(parts)], ['siteagent-setup-assistant.json', assistant]]
+  : [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup], ['5-knowledge-builder.json', knowledge], ['6-setup-assistant.json', assistant]];
 for (const [file, wf] of files) {
   const out = CLOUD ? toCloud(wf) : wf;
   writeFileSync(join(OUT, file), JSON.stringify(out, null, 2) + '\n');

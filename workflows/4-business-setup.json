@@ -31,7 +31,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst s = (v) => String(v ?? '').trim();\r\nconst out = {\r\n  businessId: s(b.businessId), editKey: s(b.editKey),\r\n  name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),\r\n  botType: ['ai', 'inquiry', 'lead'].includes(s(b.botType)) ? s(b.botType) : 'ai',\r\n  // A knowledge base built by the Knowledge Builder; knowledge then holds only extra notes.\r\n  draftId: /^[0-9a-f]{32}$/.test(s(b.draftId)) ? s(b.draftId) : '',\r\n  // Where the setup page / assistant is hosted; embed.js is served from the same folder.\r\n  siteUrl: /^https?:\\/\\/[^\\s\"'<>]+$/.test(s(b.siteUrl)) ? s(b.siteUrl).replace(/\\/+$/, '') : '',\r\n};\r\nout.mode = out.businessId ? 'update' : 'create';\r\nif (out.mode === 'create') {\r\n  const slug = out.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'biz';\r\n  out.businessId = `${slug}-${Math.random().toString(36).slice(2, 7)}`;\r\n}\r\nconst errors = [];\r\nif (out.name.length < 2) errors.push('Business name is required.');\r\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');\r\nif (out.botType === 'ai' && !out.draftId && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');\r\nif (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');\r\nreturn [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];\r\n  "
+        "jsCode": "const b = $input.first().json.body || {};\nconst s = (v) => String(v ?? '').trim();\nconst out = {\n  businessId: s(b.businessId), editKey: s(b.editKey),\n  name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),\n  botType: ['ai', 'inquiry', 'lead'].includes(s(b.botType)) ? s(b.botType) : 'ai',\n  // A knowledge base built by the Knowledge Builder; knowledge then holds only extra notes.\n  draftId: /^[0-9a-f]{32}$/.test(s(b.draftId)) ? s(b.draftId) : '',\n  // Where the setup page / assistant is hosted; embed.js is served from the same folder.\n  siteUrl: /^https?:\\/\\/[^\\s\"'<>]+$/.test(s(b.siteUrl)) ? s(b.siteUrl).replace(/\\/+$/, '') : '',\n};\nout.mode = out.businessId ? 'update' : 'create';\nif (out.mode === 'create') {\n  const slug = out.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'biz';\n  out.businessId = `${slug}-${Math.random().toString(36).slice(2, 7)}`;\n}\nconst errors = [];\nif (out.name.length < 2) errors.push('Business name is required.');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');\nif (out.botType === 'ai' && !out.draftId && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');\nif (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');\nreturn [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];\n  "
       }
     },
     {
@@ -134,7 +134,7 @@
         -160
       ],
       "parameters": {
-        "jsCode": "\r\nconst b = $input.first().json;\r\nconst v = $('Validate Business').first().json;\r\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\r\nconst esc = (x) => String(x).replace(/&/g, '&amp;').replace(/\"/g, '&quot;').replace(/</g, '&lt;');\r\nconst attrs = {\r\n  'data-business': b.id,\r\n  'data-name': b.name,\r\n  'data-type': b.bot_type,\r\n  'data-chat': base + '/webhook/siteagent-chat/chat',\r\n  'data-lead': base + '/webhook/capture-lead',\r\n};\r\nconst snippet = `<script src=\"${esc(v.siteUrl)}/embed.js\" ${Object.entries(attrs).map(([k, x]) => `${k}=\"${esc(x)}\"`).join(' ')} defer></script>`;\r\nconst q = (o) => Object.entries(o).map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join('&');\r\nconst previewUrl = `${v.siteUrl}/preview.html?${q({ id: b.id, type: b.bot_type, name: b.name })}`;\r\nreturn [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, botType: b.bot_type, snippet, previewUrl } }];\r\n  "
+        "jsCode": "const b = $input.first().json;\nconst v = $('Validate Business').first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nconst esc = (x) => String(x).replace(/&/g, '&amp;').replace(/\"/g, '&quot;').replace(/</g, '&lt;');\nconst attrs = {\n  'data-business': b.id,\n  'data-name': b.name,\n  'data-type': b.bot_type,\n  'data-chat': base + '/webhook/siteagent-chat/chat',\n  'data-lead': base + '/webhook/capture-lead',\n};\nconst snippet = `<script src=\"${esc(v.siteUrl)}/embed.js\" ${Object.entries(attrs).map(([k, x]) => `${k}=\"${esc(x)}\"`).join(' ')} defer></script>`;\nconst q = (o) => Object.entries(o).map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join('&');\nconst previewUrl = `${v.siteUrl}/preview.html?${q({ id: b.id, type: b.bot_type, name: b.name })}`;\nreturn [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, botType: b.bot_type, snippet, previewUrl } }];\n  "
       }
     },
     {
@@ -247,176 +247,6 @@
           "responseCode": 200
         }
       }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000082",
-      "name": "Setup Chat",
-      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        0,
-        640
-      ],
-      "webhookId": "siteagent-setup-chat",
-      "parameters": {
-        "public": true,
-        "mode": "webhook",
-        "options": {
-          "allowedOrigins": "*"
-        }
-      }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000083",
-      "name": "Setup Assistant",
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 1.7,
-      "position": [
-        260,
-        640
-      ],
-      "parameters": {
-        "promptType": "define",
-        "text": "={{ $('Setup Chat').first().json.chatInput }}",
-        "options": {
-          "systemMessage": "=You are the SiteAgent setup assistant. You help business owners add a chatbot with business automation to their website, and you give them a ready-to-paste snippet.\n\n## Bot types we offer\n1. 🤖 **AI Assistant** (recommended): answers visitors' questions from the business's own knowledge base (services, prices, policies), captures interested visitors as leads, AI-scores each lead, and lets the owner send a proposal PDF in one click. When the customer accepts, the invoice PDF is sent automatically.\n2. 💼 **Business Inquiry bot**: a simple guided chat that asks the visitor for name, email and enquiry. The owner gets an email with a \"Create proposal\" button, then proposal PDF -> customer accepts -> invoice, all automatic.\n3. 📊 **Lead Capture bot**: a guided chat that asks for name, mobile, email and requirement. Each lead is AI-scored (hot/warm/cold); the owner is notified and hot leads get an automatic reply.\n\n## How to set one up\n1. Ask which bot type they want. If they are unsure, recommend the AI Assistant.\n2. Collect: business name, and the owner email (where leads and proposals will be sent).\n3. For the AI Assistant only, build the knowledge base:\n   - Ask for their website link. If they have one, call `import_website` with it. Tell them how many pages you read and summarize what you learned in 3-5 bullet points (main services, prices, hours, contact). Mention any warnings.\n   - Then ask whether anything is missing or wrong (prices not on the site, discounts, policies, timings). Their answers become extra notes.\n   - If they have no website, or it could not be read, collect the details in chat: services and prices, process and timelines, policies, hours and contact. For brochures or price-list PDFs, point them to the setup form (setup.html), which can read documents.\n   - Never invent prices, services or policies.\n4. Show a short summary (type, name, email, and for the AI Assistant what the knowledge base covers) and ask them to confirm.\n5. After they confirm, call `create_assistant` exactly once. If you used `import_website`, pass its draftId and put only the extra notes in knowledge; otherwise put the full organized knowledge in knowledge.\n6. On success, reply with:\n   - the `snippet` from the tool result inside an ```html code block, copied EXACTLY, character for character;\n   - \"Paste this just before </body> on every page where the chat should appear.\";\n   - the `previewUrl` so they can try it now;\n   - their **Business ID** and **Edit key**, telling them to save both, since they are needed to change the bot later.\n   If the tool returns an error, explain it simply and ask for the corrected detail.\n\n## Updating an existing bot\nAsk for the Business ID and Edit key, then the new details, then call `create_assistant` with businessId and editKey filled in.\n\n## Rules\n- Keep replies short (under 6 lines) except when giving the snippet.\n- If asked how it works, explain the flow of the relevant bot type as a short numbered list.\n- Only discuss SiteAgent, chatbots and business automation. For anything else, reply: \"I can only help with setting up your SiteAgent chatbot and automations 😊 Which would you like: an AI Assistant, a Business Inquiry bot, or a Lead Capture bot?\"",
-          "maxIterations": 6
-        }
-      }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000084",
-      "name": "Gemini Setup",
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
-      "typeVersion": 1,
-      "position": [
-        140,
-        880
-      ],
-      "parameters": {
-        "modelName": "models/gemini-2.5-flash",
-        "options": {
-          "temperature": 0.2
-        }
-      },
-      "credentials": {
-        "googlePalmApi": {
-          "id": "SiteAgentGemini1",
-          "name": "SiteAgent Gemini"
-        }
-      }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000085",
-      "name": "Setup Memory",
-      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
-      "typeVersion": 1.3,
-      "position": [
-        300,
-        880
-      ],
-      "parameters": {
-        "sessionIdType": "customKey",
-        "sessionKey": "={{ $('Setup Chat').first().json.sessionId }}",
-        "contextWindowLength": 30
-      }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000086",
-      "name": "create_assistant",
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.2,
-      "position": [
-        460,
-        880
-      ],
-      "parameters": {
-        "descriptionType": "manual",
-        "toolDescription": "Create (or update) a SiteAgent chatbot for a business. Call only after the owner confirmed the summary. Returns {ok, snippet, previewUrl, businessId, editKey} or {ok:false, error}.",
-        "method": "POST",
-        "url": "http://localhost:5678/webhook/save-business",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "botType",
-              "value": "={{ $fromAI('botType', 'One of: ai, inquiry, lead', 'string') }}"
-            },
-            {
-              "name": "name",
-              "value": "={{ $fromAI('name', 'Business name', 'string') }}"
-            },
-            {
-              "name": "ownerEmail",
-              "value": "={{ $fromAI('ownerEmail', 'Owner email where leads and proposals go', 'string') }}"
-            },
-            {
-              "name": "knowledge",
-              "value": "={{ $fromAI('knowledge', 'With a draftId: only the extra notes the owner added, or empty. Without a draftId: the full knowledge base organized in sections using only facts the owner gave. Empty string for inquiry/lead bots.', 'string') }}"
-            },
-            {
-              "name": "draftId",
-              "value": "={{ $fromAI('draftId', 'draftId returned by import_website, otherwise empty string', 'string') }}"
-            },
-            {
-              "name": "businessId",
-              "value": "={{ $fromAI('businessId', 'Existing Business ID when updating, otherwise empty string', 'string') }}"
-            },
-            {
-              "name": "editKey",
-              "value": "={{ $fromAI('editKey', 'Edit key when updating, otherwise empty string', 'string') }}"
-            },
-            {
-              "name": "siteUrl",
-              "value": "={{ ($('Setup Chat').first().json.metadata || {}).siteUrl || '' }}"
-            }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        }
-      }
-    },
-    {
-      "id": "00000000-0000-4000-8000-000000000087",
-      "name": "import_website",
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.2,
-      "position": [
-        620,
-        880
-      ],
-      "parameters": {
-        "descriptionType": "manual",
-        "toolDescription": "Read a business's website and build a knowledge base draft from it. Takes about 30 seconds. Returns {ok, draftId, pagesRead, warnings, preview} or {ok:false, error}.",
-        "method": "POST",
-        "url": "http://localhost:5678/webhook/build-knowledge?brief=1",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "websiteUrl",
-              "value": "={{ $fromAI('websiteUrl', 'The business website address the owner gave', 'string') }}"
-            },
-            {
-              "name": "businessName",
-              "value": "={{ $fromAI('businessName', 'Business name if known, otherwise empty string', 'string') }}"
-            }
-          ]
-        },
-        "options": {
-          "timeout": 90000,
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        }
-      }
     }
   ],
   "connections": {
@@ -517,61 +347,6 @@
           {
             "node": "Respond Business",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Setup Chat": {
-      "main": [
-        [
-          {
-            "node": "Setup Assistant",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gemini Setup": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Setup Assistant",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Setup Memory": {
-      "ai_memory": [
-        [
-          {
-            "node": "Setup Assistant",
-            "type": "ai_memory",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "create_assistant": {
-      "ai_tool": [
-        [
-          {
-            "node": "Setup Assistant",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "import_website": {
-      "ai_tool": [
-        [
-          {
-            "node": "Setup Assistant",
-            "type": "ai_tool",
             "index": 0
           }
         ]
