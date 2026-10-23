@@ -30,6 +30,20 @@ Visitor ──chat──► AI agent (answers ONLY from the business's knowledge
 | 3 | Proposals & Invoices | `GET proposal-form`, `POST proposal-submit`, `GET accept-proposal` | Owner's proposal form → PDF → client email → one-click accept → invoice PDF |
 | 4 | Business Setup | `POST save-business`, `GET get-business` | Any business can register, write its knowledge base and get its embed snippet; edit later with an edit key |
 
+### How a business owner gets a chatbot
+1. Open **`assistant.html`**, the AI setup assistant (like AgentOps), and chat: *"I need a chatbot for my bakery."* Or use the **`setup.html`** form.
+2. Pick a bot type:
+   | Type | What visitors get | What the owner gets |
+   |---|---|---|
+   | 🤖 **AI Assistant** | Answers about services, prices and policies from the business's knowledge base, then collects their details | Scored lead → proposal → invoice |
+   | 💼 **Business Inquiry** | Guided chat: name → email → enquiry | Lead email with "Create proposal" → proposal → invoice |
+   | 📊 **Lead Capture** | Guided chat: name → mobile → email → requirement | AI-scored lead; hot leads get an instant reply |
+3. Paste the one-line snippet into the website:
+   ```html
+   <script src="https://YOUR-SITE/embed.js" data-business="..." data-type="ai" data-chat="..." data-lead="..." defer></script>
+   ```
+4. To change details later, give the assistant (or the form) the Business ID and Edit key.
+
 ### Why answers stay accurate
 Each business's knowledge base is fetched **by ID on every message** and given to the agent in full, with strict rules: answer only from it, quote prices exactly, say "I don't know" and offer a follow-up instead of guessing, and refuse off-topic questions. For small-business knowledge bases (up to tens of pages) this is more reliable than vector search, which can retrieve the wrong chunk. Businesses are isolated: one business's facts never reach another's assistant. `tools/test-agent.mjs` checks this.
 
@@ -71,7 +85,7 @@ tools/build-workflows.mjs   source of truth for the workflows — edit here, the
 tools/import.ps1            build → import → publish → restart n8n
 tools/test-agent.mjs        knowledge-accuracy + lead-capture checks
 workflows/*.json            generated, importable n8n workflows
-site/                       demo website, setup page, preview page, widget loader
+site/                       demo site, AI setup assistant, setup form, preview, embed.js
 ```
 
 ## Going to production

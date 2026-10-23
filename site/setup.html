@@ -12,7 +12,7 @@
     h1 { margin:0 0 4px; font-size:28px; } .sub { color:var(--muted); margin:0 0 24px; }
     .card { background:#fff; border-radius:14px; padding:24px; box-shadow:0 2px 12px rgba(0,0,0,.05); margin-bottom:20px; }
     label { display:block; font-weight:600; font-size:14px; margin:16px 0 6px; } label small { font-weight:400; color:var(--muted); }
-    input, textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+    input, textarea, select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
     textarea { min-height:280px; font-family:ui-monospace,Consolas,monospace; font-size:13px; }
     button { margin-top:20px; background:var(--accent); color:#fff; border:0; border-radius:8px; padding:12px 18px; font-size:15px; font-weight:600; cursor:pointer; }
     button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); margin-top:0; }
@@ -25,7 +25,7 @@
 <body>
 <main>
   <h1>SiteAgent setup</h1>
-  <p class="sub">Give your website an AI assistant that answers from <b>your</b> knowledge base and turns visitors into leads, proposals and invoices.</p>
+  <p class="sub">Prefer chatting? Use the <a href="assistant.html">AI setup assistant</a>. Or fill in the form to give your website an AI assistant that answers from <b>your</b> knowledge base and turns visitors into leads, proposals and invoices.</p>
 
   <div class="card">
     <b>Editing an existing assistant?</b>
@@ -37,12 +37,18 @@
   </div>
 
   <form class="card" id="form">
+    <label for="type">Bot type</label>
+    <select id="type">
+      <option value="ai">🤖 AI Assistant — answers questions from your knowledge base (recommended)</option>
+      <option value="inquiry">💼 Business Inquiry bot — name → email → enquiry → proposal &amp; invoice</option>
+      <option value="lead">📊 Lead Capture bot — name → mobile → email → requirement → AI scoring</option>
+    </select>
     <label for="name">Business name</label>
     <input id="name" required placeholder="Sunrise Dental Clinic">
     <label for="owner">Owner email <small>— leads and proposals are sent here</small></label>
     <input id="owner" type="email" required placeholder="you@business.com">
-    <label for="kb">Knowledge base <small>— the assistant answers ONLY from this. Include services, prices, process, policies, FAQ, hours, contact.</small></label>
-    <textarea id="kb" required placeholder="# Services and pricing&#10;- Teeth cleaning: Rs 1,200 (45 minutes)&#10;...&#10;&#10;# Policies&#10;...&#10;&#10;# Hours &amp; contact&#10;..."></textarea>
+    <label for="kb">Knowledge base <small>— required for the AI Assistant, which answers ONLY from this. Include services, prices, process, policies, FAQ, hours, contact.</small></label>
+    <textarea id="kb" placeholder="# Services and pricing&#10;- Teeth cleaning: Rs 1,200 (45 minutes)&#10;...&#10;&#10;# Policies&#10;...&#10;&#10;# Hours &amp; contact&#10;..."></textarea>
     <button type="submit" id="save">Create my assistant</button>
     <div class="msg" id="msg"></div>
   </form>
@@ -59,21 +65,22 @@
 
 <script src="config.js"></script>
 <script>
-  const N8N = window.SITEAGENT.n8n;
-  const P = window.SITEAGENT.prefix || '';
+  const url = (path) => window.SITEAGENT.url(path);
+  const siteUrl = new URL('.', location.href).href.replace(/\/$/, '');
   const $ = (id) => document.getElementById(id);
   let current = { businessId: '', editKey: '' };
 
   function show(type, text) { const m = $('msg'); m.className = 'msg ' + type; m.textContent = text; }
 
   $('load').onclick = async () => {
-    const res = await fetch(`${N8N}/webhook/${P}get-business?id=${encodeURIComponent($('lid').value.trim())}&key=${encodeURIComponent($('lkey').value.trim())}`);
+    const res = await fetch(`${url('get-business')}?id=${encodeURIComponent($('lid').value.trim())}&key=${encodeURIComponent($('lkey').value.trim())}`);
     const data = await res.json().catch(() => ({ ok: false, error: 'n8n is not reachable.' }));
     if (!data.ok) return show('err', data.error);
     current = { businessId: data.business.id, editKey: $('lkey').value.trim() };
     $('name').value = data.business.name;
     $('owner').value = data.business.owner_email;
     $('kb').value = data.business.knowledge;
+    $('type').value = data.business.bot_type || 'ai';
     $('save').textContent = 'Save changes';
     show('ok', `Loaded ${data.business.name}. Edit below and save — the assistant uses the new knowledge immediately.`);
   };
@@ -82,10 +89,10 @@
     e.preventDefault();
     $('save').disabled = true;
     try {
-      const res = await fetch(`${N8N}/webhook/${P}save-business`, {
+      const res = await fetch(url('save-business'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...current, name: $('name').value, ownerEmail: $('owner').value, knowledge: $('kb').value }),
+        body: JSON.stringify({ ...current, botType: $('type').value, siteUrl, name: $('name').value, ownerEmail: $('owner').value, knowledge: $('kb').value }),
       });
       const data = await res.json().catch(() => ({ ok: false, error: 'n8n is not reachable — is Docker running and the workflow active?' }));
       if (!data.ok) return show('err', data.error);
@@ -93,7 +100,7 @@
       $('rid').textContent = data.businessId;
       $('rkey').textContent = data.editKey;
       $('snippet').textContent = data.snippet;
-      $('preview').href = `preview.html?id=${encodeURIComponent(data.businessId)}&name=${encodeURIComponent(data.name)}`;
+      $('preview').href = data.previewUrl;
       $('result').style.display = 'block';
       $('save').textContent = 'Save changes';
       show('ok', 'Saved.');

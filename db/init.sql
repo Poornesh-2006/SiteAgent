@@ -6,6 +6,7 @@ CREATE TABLE businesses (
   owner_email  TEXT NOT NULL,
   knowledge    TEXT NOT NULL,
   currency     TEXT NOT NULL DEFAULT 'INR',
+  bot_type     TEXT NOT NULL DEFAULT 'ai',      -- ai | inquiry | lead
   edit_key     TEXT NOT NULL DEFAULT replace(gen_random_uuid()::text, '-', ''),
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()

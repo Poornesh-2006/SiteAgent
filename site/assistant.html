@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SiteAgent Assistant</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/style.css" />
+  <style>
+    :root {
+      --ink:#1b1d29; --muted:#5d6275; --accent:#4f46e5; --line:#e3e5ee; --bg:#f4f4f8; --card:#fff;
+      --chat--color--primary:#4f46e5; --chat--color--primary-shade-50:#4338ca;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+    header { max-width:1100px; margin:0 auto; padding:20px 16px 0; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .logo { font-weight:800; font-size:20px; } .logo span { color:var(--accent); }
+    header a { color:var(--muted); text-decoration:none; font-size:14px; margin-left:16px; }
+    main { max-width:1100px; margin:0 auto; padding:24px 16px 40px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:24px; }
+    h1 { font-size:clamp(26px,4vw,36px); line-height:1.15; margin:0 0 10px; letter-spacing:-.01em; }
+    .sub { color:var(--muted); margin:0 0 20px; line-height:1.5; }
+    .type { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+    .type b { display:block; margin-bottom:4px; } .type p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
+    .try { font-size:14px; color:var(--muted); margin-top:16px; line-height:1.7; }
+    .try code { background:#e9e9f5; padding:2px 6px; border-radius:4px; color:var(--ink); }
+    #chat { height:min(680px,calc(100vh - 120px)); min-height:480px; border-radius:16px; overflow:hidden; background:var(--card); box-shadow:0 4px 24px rgba(0,0,0,.08); }
+    @media (max-width:860px) { main { grid-template-columns:1fr; } #chat { height:600px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">Site<span>Agent</span></div>
+    <nav><a href="index.html">Demo site</a><a href="setup.html">Setup form</a></nav>
+  </header>
+  <main>
+    <section>
+      <h1>Get a chatbot for your website in 2 minutes</h1>
+      <p class="sub">Tell the assistant about your business. It builds your bot and gives you one line of code to paste into your site.</p>
+      <div class="type"><b>🤖 AI Assistant (recommended)</b><p>Answers visitors' questions from your own information, captures leads, scores them with AI, and runs proposals and invoices for you.</p></div>
+      <div class="type"><b>💼 Business Inquiry bot</b><p>Guided chat: name → email → enquiry. You get a "Create proposal" button; the customer gets a proposal PDF, and the invoice goes out when they accept.</p></div>
+      <div class="type"><b>📊 Lead Capture bot</b><p>Guided chat: name → mobile → email → requirement. Each lead is scored hot / warm / cold, and hot leads get an instant reply.</p></div>
+      <p class="try">Try saying: <code>I need a chatbot for my bakery</code> or <code>How does the business inquiry bot work?</code></p>
+    </section>
+    <div id="chat"></div>
+  </main>
+
+  <script src="config.js"></script>
+  <script type="module">
+    import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/chat.bundle.es.js';
+    createChat({
+      webhookUrl: window.SITEAGENT.url('siteagent-setup-chat/chat'),
+      mode: 'fullscreen',
+      target: '#chat',
+      // Lets the assistant build snippets that load embed.js from wherever this page is hosted.
+      metadata: { siteUrl: new URL('.', location.href).href.replace(/\/$/, '') },
+      showWelcomeScreen: false,
+      initialMessages: [
+        "Hi! 👋 I'm the SiteAgent setup assistant.",
+        'Which would you like for your website: an 🤖 AI Assistant, a 💼 Business Inquiry bot, or a 📊 Lead Capture bot? If you\'re not sure, tell me about your business and I\'ll suggest one.',
+      ],
+      i18n: { en: { title: 'SiteAgent setup assistant', subtitle: 'Your chatbot, ready to paste', footer: '', getStarted: 'New conversation', inputPlaceholder: 'Tell me about your business…' } },
+    });
+  </script>
+</body>
+</html>

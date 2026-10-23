@@ -31,7 +31,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst s = (v) => String(v ?? '').trim();\r\nconst out = {\r\n  businessId: s(b.businessId), editKey: s(b.editKey),\r\n  name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),\r\n};\r\nout.mode = out.businessId ? 'update' : 'create';\r\nif (out.mode === 'create') {\r\n  const slug = out.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'biz';\r\n  out.businessId = `${slug}-${Math.random().toString(36).slice(2, 7)}`;\r\n}\r\nconst errors = [];\r\nif (out.name.length < 2) errors.push('Business name is required.');\r\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');\r\nif (out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');\r\nif (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');\r\nreturn [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];\r\n  "
+        "jsCode": "const b = $input.first().json.body || {};\nconst s = (v) => String(v ?? '').trim();\nconst out = {\n  businessId: s(b.businessId), editKey: s(b.editKey),\n  name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),\n  botType: ['ai', 'inquiry', 'lead'].includes(s(b.botType)) ? s(b.botType) : 'ai',\n  // Where the setup page / assistant is hosted; embed.js is served from the same folder.\n  siteUrl: /^https?:\\/\\/[^\\s\"'<>]+$/.test(s(b.siteUrl)) ? s(b.siteUrl).replace(/\\/+$/, '') : '',\n};\nout.mode = out.businessId ? 'update' : 'create';\nif (out.mode === 'create') {\n  const slug = out.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'biz';\n  out.businessId = `${slug}-${Math.random().toString(36).slice(2, 7)}`;\n}\nconst errors = [];\nif (out.name.length < 2) errors.push('Business name is required.');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');\nif (out.botType === 'ai' && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');\nif (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');\nreturn [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];\n  "
       }
     },
     {
@@ -78,9 +78,9 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH upd AS (\n  UPDATE businesses SET name = $2, owner_email = $3, knowledge = $4, updated_at = now()\n  WHERE $6 = 'update' AND id = $1 AND edit_key = $5 RETURNING *\n),\nins AS (\n  INSERT INTO businesses (id, name, owner_email, knowledge)\n  SELECT $1, $2, $3, $4 WHERE $6 = 'create' RETURNING *\n)\nSELECT id, name, edit_key FROM upd UNION ALL SELECT id, name, edit_key FROM ins",
+        "query": "WITH upd AS (\n  UPDATE businesses SET name = $2, owner_email = $3, knowledge = $4, bot_type = $7, updated_at = now()\n  WHERE $6 = 'update' AND id = $1 AND edit_key = $5 RETURNING *\n),\nins AS (\n  INSERT INTO businesses (id, name, owner_email, knowledge, bot_type)\n  SELECT $1, $2, $3, $4, $7 WHERE $6 = 'create' RETURNING *\n)\nSELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key, bot_type FROM ins",
         "options": {
-          "queryReplacement": "={{ [ $json.businessId, $json.name, $json.ownerEmail, $json.knowledge, $json.editKey, $json.mode ] }}"
+          "queryReplacement": "={{ [ $json.businessId, $json.name, $json.ownerEmail, $json.knowledge, $json.editKey, $json.mode, $json.botType ] }}"
         }
       },
       "credentials": {
@@ -134,7 +134,7 @@
         -160
       ],
       "parameters": {
-        "jsCode": "\nconst b = $input.first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nconst js = (v) => JSON.stringify(v);\nconst snippet = [\n  '<link href=\"https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/style.css\" rel=\"stylesheet\" />',\n  '<script type=\"module\">',\n  \"  import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat@1.41.3/dist/chat.bundle.es.js';\",\n  '  createChat({',\n  '    webhookUrl: ' + js(base + '/webhook/siteagent-chat/chat') + ',',\n  '    metadata: { businessId: ' + js(b.id) + ' },',\n  '    showWelcomeScreen: false,',\n  '    initialMessages: [' + js('Hi! 👋 Welcome to ' + b.name + '.') + ', ' + js('Ask me anything about our services, pricing or how we work.') + '],',\n  '    i18n: { en: { title: ' + js(b.name) + \", subtitle: 'Typically replies instantly', footer: '', getStarted: 'New conversation', inputPlaceholder: 'Type your question…' } },\",\n  '  });',\n  '</' + 'script>',\n].join('\\n');\nreturn [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, snippet } }];\n\n"
+        "jsCode": "const b = $input.first().json;\nconst v = $('Validate Business').first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nconst esc = (x) => String(x).replace(/&/g, '&amp;').replace(/\"/g, '&quot;').replace(/</g, '&lt;');\nconst attrs = {\n  'data-business': b.id,\n  'data-name': b.name,\n  'data-type': b.bot_type,\n  'data-chat': base + '/webhook/siteagent-chat/chat',\n  'data-lead': base + '/webhook/capture-lead',\n};\nconst snippet = `<script src=\"${esc(v.siteUrl)}/embed.js\" ${Object.entries(attrs).map(([k, x]) => `${k}=\"${esc(x)}\"`).join(' ')} defer></script>`;\nconst q = (o) => Object.entries(o).map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join('&');\nconst previewUrl = `${v.siteUrl}/preview.html?${q({ id: b.id, type: b.bot_type, name: b.name })}`;\nreturn [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, botType: b.bot_type, snippet, previewUrl } }];\n  "
       }
     },
     {
@@ -218,7 +218,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, name, owner_email, knowledge FROM businesses WHERE id = $1 AND edit_key = $2",
+        "query": "SELECT id, name, owner_email, knowledge, bot_type FROM businesses WHERE id = $1 AND edit_key = $2",
         "options": {
           "queryReplacement": "={{ [ String($json.query.id || ''), String($json.query.key || '') ] }}"
         }
@@ -245,6 +245,135 @@
         "responseBody": "={{ JSON.stringify($json.id ? { ok: true, business: $json } : { ok: false, error: 'Business not found or edit key is wrong.' }) }}",
         "options": {
           "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000071",
+      "name": "Setup Chat",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        640
+      ],
+      "webhookId": "siteagent-setup-chat",
+      "parameters": {
+        "public": true,
+        "mode": "webhook",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000072",
+      "name": "Setup Assistant",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        260,
+        640
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Setup Chat').first().json.chatInput }}",
+        "options": {
+          "systemMessage": "=You are the SiteAgent setup assistant. You help business owners add a chatbot with business automation to their website, and you give them a ready-to-paste snippet.\n\n## Bot types we offer\n1. 🤖 **AI Assistant** (recommended): answers visitors' questions from the business's own knowledge base (services, prices, policies), captures interested visitors as leads, AI-scores each lead, and lets the owner send a proposal PDF in one click. When the customer accepts, the invoice PDF is sent automatically.\n2. 💼 **Business Inquiry bot**: a simple guided chat that asks the visitor for name, email and enquiry. The owner gets an email with a \"Create proposal\" button, then proposal PDF -> customer accepts -> invoice, all automatic.\n3. 📊 **Lead Capture bot**: a guided chat that asks for name, mobile, email and requirement. Each lead is AI-scored (hot/warm/cold); the owner is notified and hot leads get an automatic reply.\n\n## How to set one up\n1. Ask which bot type they want. If they are unsure, recommend the AI Assistant.\n2. Collect: business name, and the owner email (where leads and proposals will be sent).\n3. For the AI Assistant only, collect the knowledge base: services and prices, process and timelines, policies (payment, refunds, delivery), hours and contact details. Let them paste it or describe it. Organize what they give you into clear sections, using only facts they stated. Never invent prices, services or policies; if something important is missing, ask once and move on if they skip it.\n4. Show a short summary (type, name, email, and for the AI Assistant a few lines of the knowledge base) and ask them to confirm.\n5. After they confirm, call `create_assistant` exactly once.\n6. On success, reply with:\n   - the `snippet` from the tool result inside an ```html code block, copied EXACTLY, character for character;\n   - \"Paste this just before </body> on every page where the chat should appear.\";\n   - the `previewUrl` so they can try it now;\n   - their **Business ID** and **Edit key**, telling them to save both, since they are needed to change the bot later.\n   If the tool returns an error, explain it simply and ask for the corrected detail.\n\n## Updating an existing bot\nAsk for the Business ID and Edit key, then the new details, then call `create_assistant` with businessId and editKey filled in.\n\n## Rules\n- Keep replies short (under 6 lines) except when giving the snippet.\n- If asked how it works, explain the flow of the relevant bot type as a short numbered list.\n- Only discuss SiteAgent, chatbots and business automation. For anything else, reply: \"I can only help with setting up your SiteAgent chatbot and automations 😊 Which would you like: an AI Assistant, a Business Inquiry bot, or a Lead Capture bot?\"",
+          "maxIterations": 6
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000073",
+      "name": "Gemini Setup",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        140,
+        880
+      ],
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SiteAgentGemini1",
+          "name": "SiteAgent Gemini"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000074",
+      "name": "Setup Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        300,
+        880
+      ],
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Setup Chat').first().json.sessionId }}",
+        "contextWindowLength": 30
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000075",
+      "name": "create_assistant",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        880
+      ],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Create (or update) a SiteAgent chatbot for a business. Call only after the owner confirmed the summary. Returns {ok, snippet, previewUrl, businessId, editKey} or {ok:false, error}.",
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/save-business",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "botType",
+              "value": "={{ $fromAI('botType', 'One of: ai, inquiry, lead', 'string') }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $fromAI('name', 'Business name', 'string') }}"
+            },
+            {
+              "name": "ownerEmail",
+              "value": "={{ $fromAI('ownerEmail', 'Owner email where leads and proposals go', 'string') }}"
+            },
+            {
+              "name": "knowledge",
+              "value": "={{ $fromAI('knowledge', 'Knowledge base for the AI Assistant, organized in sections using only facts the owner gave. Empty string for inquiry/lead bots.', 'string') }}"
+            },
+            {
+              "name": "businessId",
+              "value": "={{ $fromAI('businessId', 'Existing Business ID when updating, otherwise empty string', 'string') }}"
+            },
+            {
+              "name": "editKey",
+              "value": "={{ $fromAI('editKey', 'Edit key when updating, otherwise empty string', 'string') }}"
+            },
+            {
+              "name": "siteUrl",
+              "value": "={{ ($('Setup Chat').first().json.metadata || {}).siteUrl || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         }
       }
     }
@@ -347,6 +476,50 @@
           {
             "node": "Respond Business",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setup Chat": {
+      "main": [
+        [
+          {
+            "node": "Setup Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Setup": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Setup Assistant",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setup Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Setup Assistant",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_assistant": {
+      "ai_tool": [
+        [
+          {
+            "node": "Setup Assistant",
+            "type": "ai_tool",
             "index": 0
           }
         ]

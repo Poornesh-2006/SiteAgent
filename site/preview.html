@@ -7,25 +7,24 @@
   <style>
     body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:#f4f4f8; color:#1b1d29; }
     main { max-width:640px; margin:0 auto; padding:64px 16px; text-align:center; }
-    p { color:#5d6275; }
+    p { color:#5d6275; line-height:1.6; }
   </style>
 </head>
 <body>
   <main>
-    <h1 id="title">Assistant preview</h1>
-    <p>This is how the assistant will look on your website. Open the chat bubble in the bottom-right corner.</p>
-    <p><a href="setup.html">← Back to setup</a></p>
+    <h1 id="title">Chatbot preview</h1>
+    <p id="kind"></p>
+    <p>This is how the chatbot will look on your website. Open the chat bubble in the bottom-right corner.</p>
+    <p><a href="assistant.html">← Back to the setup assistant</a></p>
   </main>
   <script src="config.js"></script>
   <script>
-    const q = new URLSearchParams(location.search);
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = 'widget.js';
-    s.dataset.business = q.get('id') || 'pixelcraft';
-    s.dataset.name = q.get('name') || 'Preview';
-    document.getElementById('title').textContent = (q.get('name') || 'Assistant') + ' — preview';
-    document.body.appendChild(s);
+    var q = new URLSearchParams(location.search);
+    var type = q.get('type') || 'ai';
+    var name = q.get('name') || 'Your business';
+    document.getElementById('title').textContent = name + ' — preview';
+    document.getElementById('kind').textContent = { ai: '🤖 AI Assistant', inquiry: '💼 Business Inquiry bot', lead: '📊 Lead Capture bot' }[type] || '';
+    siteAgentEmbed({ business: q.get('id') || 'pixelcraft', name: name, type: type });
   </script>
 </body>
 </html>

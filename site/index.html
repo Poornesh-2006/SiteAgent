@@ -32,7 +32,7 @@
   <div class="wrap">
     <nav>
       <div class="logo">Pixel<span>Craft</span> Studio</div>
-      <div><a href="#services">Services</a><a href="#process">Process</a><a href="setup.html">SiteAgent setup →</a></div>
+      <div><a href="#services">Services</a><a href="#process">Process</a><a href="assistant.html">Get your own chatbot →</a></div>
     </nav>
 
     <section class="hero">
@@ -59,13 +59,13 @@
 
     <div class="hint">
       <b>Try the assistant →</b> click the chat bubble in the bottom-right corner. Ask about prices, what's included, or something we <i>don't</i> offer (like mobile apps).
-      Then say you want a quote. Leads, proposals and invoices land in <a href="http://localhost:8025" style="color:#a5b4fc">Mailpit</a>.
+      Then say you want a quote. Leads, proposals and invoices land in the owner's inbox.
     </div>
 
     <footer>© PixelCraft Studio · hello@pixelcraft.example · Mon–Sat, 10am–7pm IST</footer>
   </div>
 
   <script src="config.js"></script>
-  <script type="module" src="widget.js" data-business="pixelcraft" data-name="PixelCraft Studio"></script>
+  <script>siteAgentEmbed({ business: 'pixelcraft', name: 'PixelCraft Studio', type: 'ai' });</script>
 </body>
 </html>
