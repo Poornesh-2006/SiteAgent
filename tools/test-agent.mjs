@@ -10,11 +10,14 @@ async function ask(sessionId, chatInput, businessId = 'pixelcraft') {
     body: JSON.stringify({ action: 'sendMessage', sessionId, chatInput, metadata: { businessId } }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(data)}`);
-  return String(data.output ?? data.text ?? JSON.stringify(data));
+  const reply = data.output ?? data.text;
+  if (!res.ok || typeof reply !== 'string') throw new Error(`HTTP ${res.status}, no agent reply: ${JSON.stringify(data)}`);
+  return reply;
 }
 
-const norm = (s) => s.toLowerCase().replace(/[–—]/g, '-').replace(/₹\s?/g, 'rs ');
+const norm = (s) => s.toLowerCase().replace(/[–—‑]/g, '-').replace(/[’‘]/g, "'").replace(/₹\s?/g, 'rs ');
+// Free AI tiers rate-limit per minute; DELAY=20 spaces the questions out (seconds).
+const pause = () => new Promise((r) => setTimeout(r, Number(process.env.DELAY || 0) * 1000));
 const cases = [
   { q: 'How much does a basic business website cost?', must: [/25,000|25000|25k/], why: 'exact price from KB' },
   { q: 'How long does an online store take to build?', must: [/4\s*(-|to)\s*6/], why: 'exact timeline from KB' },
@@ -28,6 +31,7 @@ const cases = [
 
 let pass = 0;
 for (const [i, c] of cases.entries()) {
+  if (i) await pause();
   const answer = await ask(`eval-${Date.now()}-${i}`, c.q);
   const a = norm(answer);
   const ok = (c.must || []).every((r) => r.test(a)) && !(c.mustNot || []).some((r) => r.test(a));
@@ -42,6 +46,7 @@ for (const msg of [
   'I want a quote for a Shopify store',
   `I'm Ravi Kumar, email ${email}. I sell spices, about 40 products, budget around Rs 80,000, want to launch in 2 months.`,
 ]) {
+  await pause();
   console.log(`      U: ${msg}\n      A: ${(await ask(s, msg)).replace(/\s+/g, ' ').slice(0, 220)}`);
 }
 console.log(`\n${pass}/${cases.length} knowledge checks passed.`);
