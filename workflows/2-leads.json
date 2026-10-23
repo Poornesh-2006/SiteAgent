@@ -31,7 +31,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const b = $input.first().json.body || {};\nconst clean = (v) => String(v ?? '').trim();\nconst lead = {\n  business_id: clean(b.business_id) || 'pixelcraft',\n  name: clean(b.name),\n  email: clean(b.email).toLowerCase(),\n  phone: clean(b.phone),\n  requirement: clean(b.requirement),\n  budget: clean(b.budget),\n};\nconst errors = [];\nif (lead.name.length < 2) errors.push('name is missing');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(lead.email)) errors.push('email address looks invalid');\nif (lead.requirement.length < 5) errors.push('requirement is missing');\nreturn [{ json: { ...lead, valid: errors.length === 0, error: errors.join('; ') } }];\n  "
+        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst clean = (v) => String(v ?? '').trim();\r\nconst lead = {\r\n  business_id: clean(b.business_id) || 'pixelcraft',\r\n  name: clean(b.name),\r\n  email: clean(b.email).toLowerCase(),\r\n  phone: clean(b.phone),\r\n  requirement: clean(b.requirement),\r\n  budget: clean(b.budget),\r\n};\r\nconst errors = [];\r\nif (lead.name.length < 2) errors.push('name is missing');\r\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(lead.email)) errors.push('email address looks invalid');\r\nif (lead.requirement.length < 5) errors.push('requirement is missing');\r\nreturn [{ json: { ...lead, valid: errors.length === 0, error: errors.join('; ') } }];\r\n  "
       }
     },
     {
@@ -184,7 +184,7 @@
         120
       ],
       "parameters": {
-        "modelName": "models/gemini-3.8-flash",
+        "modelName": "models/gemini-2.5-flash",
         "options": {
           "temperature": 0
         }
@@ -206,7 +206,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "const lead = $('Validate Lead').first().json;\nconst biz = $('Load Business').first().json;\nconst raw = $input.first().json.text || '';\nlet ai = {};\ntry { ai = JSON.parse((raw.match(/\\{[\\s\\S]*\\}/) || ['{}'])[0]); } catch (e) {}\nconst scored = Number.isFinite(Number(ai.score));\nconst score = scored ? Math.max(0, Math.min(100, Math.round(Number(ai.score)))) : 50;\nconst tier = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';\nreturn [{ json: {\n  ...lead, score, tier,\n  reason: scored ? String(ai.reason || '') : 'AI scoring unavailable - defaulted to warm.',\n  suggested_service: String(ai.suggested_service || 'Custom / unclear'),\n  business_name: biz.name, owner_email: biz.owner_email,\n} }];\n  "
+        "jsCode": "\r\nconst lead = $('Validate Lead').first().json;\r\nconst biz = $('Load Business').first().json;\r\nconst raw = $input.first().json.text || '';\r\nlet ai = {};\r\ntry { ai = JSON.parse((raw.match(/\\{[\\s\\S]*\\}/) || ['{}'])[0]); } catch (e) {}\r\nconst scored = Number.isFinite(Number(ai.score));\r\nconst score = scored ? Math.max(0, Math.min(100, Math.round(Number(ai.score)))) : 50;\r\nconst tier = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';\r\nreturn [{ json: {\r\n  ...lead, score, tier,\r\n  reason: scored ? String(ai.reason || '') : 'AI scoring unavailable - defaulted to warm.',\r\n  suggested_service: String(ai.suggested_service || 'Custom / unclear'),\r\n  business_name: biz.name, owner_email: biz.owner_email,\r\n} }];\r\n  "
       }
     },
     {
@@ -242,7 +242,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "const lead = $('Parse Score').first().json;\nconst saved = $input.first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nreturn [{ json: {\n  ...lead, lead_id: saved.id,\n  emoji: { hot: '🔥', warm: '🌤️', cold: '❄️' }[lead.tier],\n  first_name: lead.name.split(' ')[0],\n  proposal_link: `${base}/webhook/proposal-form?lead=${saved.id}&k=${saved.token}`,\n} }];\n  "
+        "jsCode": "\r\nconst lead = $('Parse Score').first().json;\r\nconst saved = $input.first().json;\r\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\r\nreturn [{ json: {\r\n  ...lead, lead_id: saved.id,\r\n  emoji: { hot: '🔥', warm: '🌤️', cold: '❄️' }[lead.tier],\r\n  first_name: lead.name.split(' ')[0],\r\n  proposal_link: `${base}/webhook/proposal-form?lead=${saved.id}&k=${saved.token}`,\r\n} }];\r\n  "
       }
     },
     {

@@ -5,6 +5,7 @@
 // Local Docker stack (default):  node tools/build-workflows.mjs            -> workflows/
 // Hosted n8n (cloud / portal):   node tools/build-workflows.mjs --cloud \
 //     --base-url=https://your-n8n.example.com --from=you@gmail.com --prefix=poornesh-
+// Extra flags: --single (one workflow), --llm=groq, --model=<model id>
 //                                                                          -> workflows-cloud/
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -27,8 +28,12 @@ const CRED = {
   postgres: { postgres: { id: 'SiteAgentPg00001', name: 'SiteAgent Postgres' } },
   smtp: { smtp: { id: 'SiteAgentSmtp001', name: 'SiteAgent SMTP' } },
   gemini: { googlePalmApi: { id: 'SiteAgentGemini1', name: 'SiteAgent Gemini' } },
+  groq: { groqApi: { id: 'SiteAgentGroq001', name: 'SiteAgent Groq' } },
 };
-const GEMINI_MODEL = 'models/gemini-3.8-flash';
+// gemini-2.5-flash works for keys created before Google retired it for new users;
+// newer keys need a newer model, e.g. --model=models/gemini-3.8-flash
+const GEMINI_MODEL = 'models/gemini-2.5-flash';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 // ---------- helpers ----------
 let uid = 0;
@@ -94,11 +99,18 @@ const email = (name, pos, p) => ({
   },
   credentials: CRED.smtp,
 });
-const gemini = (name, pos, temperature) => ({
-  id: id(), name, type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini', typeVersion: 1, position: pos,
-  parameters: { modelName: GEMINI_MODEL, options: { temperature } },
-  credentials: CRED.gemini,
-});
+// --llm=groq swaps every chat-model node to Groq (free tier allows far more requests per minute than Gemini's).
+const gemini = (name, pos, temperature) => (args.llm === 'groq'
+  ? {
+      id: id(), name: name.replace('Gemini', 'Groq'), type: '@n8n/n8n-nodes-langchain.lmChatGroq', typeVersion: 1, position: pos,
+      parameters: { model: args.model || GROQ_MODEL, options: { temperature } },
+      credentials: CRED.groq,
+    }
+  : {
+      id: id(), name, type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini', typeVersion: 1, position: pos,
+      parameters: { modelName: args.model || GEMINI_MODEL, options: { temperature } },
+      credentials: CRED.gemini,
+    });
 const toPdf = (name, pos) => ({
   id: id(), name, type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: pos,
   parameters: {

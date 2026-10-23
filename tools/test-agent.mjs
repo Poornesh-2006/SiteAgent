@@ -37,7 +37,7 @@ for (const [i, c] of cases.entries()) {
 
 // Multi-turn lead capture: the agent should call capture_lead once it has name + email + need.
 const s = `eval-lead-${Date.now()}`;
-const email = `eval.${Date.now()}@example.com`;
+const email = process.env.LEAD_EMAIL || `eval.${Date.now()}@example.com`;
 for (const msg of [
   'I want a quote for a Shopify store',
   `I'm Ravi Kumar, email ${email}. I sell spices, about 40 products, budget around Rs 80,000, want to launch in 2 months.`,
