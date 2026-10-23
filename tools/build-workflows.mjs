@@ -33,7 +33,7 @@ const CRED = {
 // gemini-2.5-flash works for keys created before Google retired it for new users;
 // newer keys need a newer model, e.g. --model=models/gemini-3.8-flash
 const GEMINI_MODEL = 'models/gemini-2.5-flash';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODEL = 'openai/gpt-oss-120b'; // tested live: 8/8 accuracy, reliable tool calls
 
 // ---------- helpers ----------
 let uid = 0;

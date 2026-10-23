@@ -77,7 +77,7 @@ site/                       demo website, setup page, preview page, widget loade
 ## Going to production
 - **Email:** edit the "SiteAgent SMTP" credential to use a real provider (Gmail: `smtp.gmail.com`, port 465, SSL, and an [App Password](https://myaccount.google.com/apppasswords)), and set `SITEAGENT_FROM_EMAIL` to that address.
 - **Public URL:** set `SITEAGENT_PUBLIC_URL` (e.g. `https://n8n.yourdomain.com`) in a `.env` file so links in emails and snippets point to it, and set `n8n` in `site/config.js`.
-- **Model:** swap the Gemini nodes for Anthropic Claude or OpenAI chat-model nodes. Nothing else changes.
+- **Model:** add `--llm=groq` to the build to use Groq (`openai/gpt-oss-120b`, tested 8/8), or swap the model nodes for Claude or OpenAI. Nothing else changes.
 - **Never commit real API keys.** Keys you add in the n8n UI stay in the n8n database, not in this repo.
 - Restrict `allowedOrigins` on the chat trigger to your customers' domains.
 
