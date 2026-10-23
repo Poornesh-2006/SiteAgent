@@ -18,8 +18,13 @@
     button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); margin-top:0; }
     .row { display:flex; gap:8px; align-items:end; flex-wrap:wrap; } .row > * { flex:1; min-width:160px; }
     pre { background:#1b1d29; color:#e6e7ff; padding:16px; border-radius:10px; overflow:auto; font-size:12.5px; white-space:pre; }
-    .msg { padding:12px; border-radius:8px; margin-top:16px; display:none; } .msg.err { background:#fde8e8; color:#9b1c1c; display:block; } .msg.ok { background:#e6f7ed; color:#14532d; display:block; }
+    .msg { padding:12px; border-radius:8px; margin-top:16px; display:none; white-space:pre-line; } .msg.err { background:#fde8e8; color:#9b1c1c; display:block; } .msg.ok { background:#e6f7ed; color:#14532d; display:block; }
     a { color:var(--accent); }
+    fieldset.build { border:1px dashed #c7c9f5; border-radius:12px; padding:4px 16px 16px; margin:20px 0 4px; background:#fafaff; }
+    fieldset.build legend { font-weight:700; padding:0 6px; }
+    fieldset.build button { margin-top:14px; }
+    textarea.short { min-height:80px; font-family:inherit; font-size:14px; }
+    .msg.info { background:#eef0ff; color:#312e81; display:block; }
   </style>
 </head>
 <body>
@@ -47,7 +52,18 @@
     <input id="name" required placeholder="Sunrise Dental Clinic">
     <label for="owner">Owner email <small>— leads and proposals are sent here</small></label>
     <input id="owner" type="email" required placeholder="you@business.com">
-    <label for="kb">Knowledge base <small>— required for the AI Assistant, which answers ONLY from this. Include services, prices, process, policies, FAQ, hours, contact.</small></label>
+    <fieldset class="build" id="builder">
+      <legend>✨ Build the knowledge base automatically</legend>
+      <label for="site">Your website <small>— we read the important pages: services, pricing, about, contact, FAQ</small></label>
+      <input id="site" placeholder="www.yourbusiness.com">
+      <label for="docs">Documents <small>— brochure, price list, menu (PDF or text, up to 5)</small></label>
+      <input id="docs" type="file" accept=".pdf,.txt,.md" multiple>
+      <label for="notes">Anything else? <small>— details that aren't on your website: offers, policies, timings</small></label>
+      <textarea id="notes" class="short" placeholder="Closed on Sundays. 10% off for first-time customers. Free delivery above Rs 999."></textarea>
+      <button type="button" class="ghost" id="build">Build knowledge base</button>
+      <div class="msg" id="buildmsg"></div>
+    </fieldset>
+    <label for="kb">Knowledge base <small>— required for the AI Assistant, which answers ONLY from this. Build it above, then review and edit it here.</small></label>
     <textarea id="kb" placeholder="# Services and pricing&#10;- Teeth cleaning: Rs 1,200 (45 minutes)&#10;...&#10;&#10;# Policies&#10;...&#10;&#10;# Hours &amp; contact&#10;..."></textarea>
     <button type="submit" id="save">Create my assistant</button>
     <div class="msg" id="msg"></div>
@@ -81,6 +97,7 @@
     $('owner').value = data.business.owner_email;
     $('kb').value = data.business.knowledge;
     $('type').value = data.business.bot_type || 'ai';
+    syncType();
     $('save').textContent = 'Save changes';
     show('ok', `Loaded ${data.business.name}. Edit below and save — the assistant uses the new knowledge immediately.`);
   };
@@ -110,7 +127,70 @@
     }
   };
 
-  $('copy').onclick = () => navigator.clipboard.writeText($('snippet').textContent).then(() => ($('copy').textContent = 'Copied!'));
+  // Guided bots don't use a knowledge base, so only show the builder for the AI Assistant.
+  const syncType = () => { $('builder').style.display = $('type').value === 'ai' ? '' : 'none'; };
+  $('type').onchange = syncType;
+
+  // ---- knowledge builder: website + documents + notes -> organized draft in the textarea
+  function buildMsg(type, text) { const m = $('buildmsg'); m.className = 'msg ' + type; m.textContent = text; }
+
+  let pdfjs;
+  async function loadPdfJs() {
+    if (pdfjs) return pdfjs;
+    await new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = ok; s.onerror = () => fail(new Error('Could not load the PDF reader.'));
+      document.head.appendChild(s);
+    });
+    pdfjs = window.pdfjsLib;
+    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    return pdfjs;
+  }
+  async function fileText(file) {
+    if (!/\.pdf$/i.test(file.name)) return file.text();
+    const lib = await loadPdfJs();
+    const pdf = await lib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = [];
+    for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
+      const content = await (await pdf.getPage(i)).getTextContent();
+      pages.push(content.items.map((it) => it.str + (it.hasEOL ? '\n' : ' ')).join(''));
+    }
+    return pages.join('\n');
+  }
+
+  $('build').onclick = async () => {
+    const files = [...$('docs').files].slice(0, 5);
+    if (!$('site').value.trim() && !files.length && !$('notes').value.trim()) {
+      return buildMsg('err', 'Add your website, a document or some notes first.');
+    }
+    $('build').disabled = true;
+    try {
+      buildMsg('info', files.length ? 'Reading your documents…' : 'Reading your website… this can take up to 30 seconds.');
+      const documents = [];
+      for (const f of files) {
+        try { documents.push({ name: f.name, text: (await fileText(f)).slice(0, 20000) }); }
+        catch (e) { buildMsg('err', `Couldn't read ${f.name}: ${e.message}`); return; }
+      }
+      if (files.length && $('site').value.trim()) buildMsg('info', 'Reading your website… this can take up to 30 seconds.');
+      const res = await fetch(url('build-knowledge'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ websiteUrl: $('site').value.trim(), notes: $('notes').value.trim(), documents, businessName: $('name').value.trim() }),
+      });
+      const data = await res.json().catch(() => ({ ok: false, error: 'The builder did not respond in time. Try again, or add fewer documents.' }));
+      if (!data.ok) return buildMsg('err', data.error);
+      $('kb').value = data.knowledge;
+      const read = data.pagesRead.length ? `Read ${data.pagesRead.length} web page(s)` : 'No web pages read';
+      const docsNote = documents.length ? ` and ${documents.length} document(s)` : '';
+      buildMsg(data.warnings.length ? 'err' : 'ok', `${read}${docsNote}. Review the knowledge base below and fix anything that's wrong before saving.` + (data.warnings.length ? '\n⚠️ ' + data.warnings.join('\n⚠️ ') : ''));
+      $('kb').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } finally {
+      $('build').disabled = false;
+    }
+  };
+
+  $('copy').onclick =() => navigator.clipboard.writeText($('snippet').textContent).then(() => ($('copy').textContent = 'Copied!'));
 </script>
 </body>
 </html>

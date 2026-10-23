@@ -1,0 +1,295 @@
+{
+  "id": "SiteAgentKnow001",
+  "name": "SiteAgent 5 - Knowledge Builder",
+  "nodes": [
+    {
+      "id": "00000000-0000-4000-8000-000000000057",
+      "name": "Build Knowledge",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "siteagent-build-knowledge",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "build-knowledge",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000058",
+      "name": "Collect Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst body = $input.first().json.body || {};\r\nconst helpers = this.helpers;\r\nconst clean = (v) => String(v ?? '').trim();\r\nconst MAX_PAGES = 12, PAGE_CHARS = 3000, TOTAL_CHARS = 18000, BUDGET_MS = 25000;\r\nconst started = Date.now();\r\nconst warnings = [];\r\n\r\n// --- which website (public sites only: never internal hosts)\r\nlet start = clean(body.websiteUrl);\r\nif (start && !/^https?:\\/\\//i.test(start)) start = 'https://' + start;\r\n// The Code-node sandbox has no URL class, so links are parsed and resolved by hand.\r\nfunction normalizePath(p) {\r\n  const out = [];\r\n  for (const seg of p.split('/')) { if (seg === '..') out.pop(); else if (seg !== '.') out.push(seg); }\r\n  const r = out.join('/');\r\n  return r.startsWith('/') ? r : '/' + r;\r\n}\r\nfunction parseUrl(text) {\r\n  const m = /^(https?):\\/\\/([^/?#@]*@)?([^/?#:]+)(:\\d*)?([^?#]*)/i.exec(text);\r\n  if (!m) return null;\r\n  return { protocol: m[1].toLowerCase(), auth: m[2] || '', hostname: m[3].toLowerCase(), port: m[4] || '', pathname: normalizePath(m[5] || '/') };\r\n}\r\nfunction resolve(link, base) {\r\n  if (/^https?:\\/\\//i.test(link)) return parseUrl(link);\r\n  if (/^[a-z][a-z0-9+.-]*:/i.test(link)) return null; // mailto:, tel:, javascript:\r\n  if (link.startsWith('//')) return parseUrl(base.protocol + ':' + link);\r\n  const path = link.split(/[?#]/)[0];\r\n  return { ...base, pathname: normalizePath(path.startsWith('/') ? path : base.pathname.replace(/[^/]*$/, '') + path) };\r\n}\r\nconst href = (u) => `${u.protocol}://${u.hostname}${u.pathname}`;\r\n\r\nlet origin = null;\r\nif (start) {\r\n  try {\r\n    const u = parseUrl(start);\r\n    if (!u) throw new Error('not a web address');\r\n    const h = u.hostname;\r\n    const internal = !h.includes('.') || h.startsWith('[') || /(^localhost$|\\.local$|\\.internal$)/.test(h)\r\n      || /^(127|10|0)\\./.test(h) || /^(192\\.168|169\\.254)\\./.test(h) || /^172\\.(1[6-9]|2\\d|3[01])\\./.test(h);\r\n    if (u.port || u.auth || internal) throw new Error('not allowed');\r\n    origin = u;\r\n  } catch (e) {\r\n    warnings.push('That website address is not valid or not allowed.');\r\n  }\r\n}\r\n\r\n// --- HTML -> plain text, dropping lines already seen on earlier pages (menus, footers)\r\nconst decode = (s) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&#39;|&apos;/g, \"'\")\r\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\\d+);/g, (m, n) => String.fromCodePoint(+n))\r\n  .replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCodePoint(parseInt(n, 16)));\r\nconst seen = new Set();\r\nfunction toText(html) {\r\n  const title = (html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i) || [])[1] || '';\r\n  const desc = (html.match(/<meta[^>]+name=[\"']description[\"'][^>]*content=[\"']([^\"']*)/i) || [])[1] || '';\r\n  const raw = decode(html\r\n    .replace(/<(script|style|noscript|svg|template|iframe)[\\s\\S]*?<\\/\\1>/gi, ' ')\r\n    .replace(/<!--[\\s\\S]*?-->/g, ' ')\r\n    .replace(/<h[1-6][^>]*>/gi, '\\n## ')\r\n    .replace(/<li[^>]*>/gi, '\\n- ')\r\n    .replace(/<\\/t[dh]>/gi, ' | ')\r\n    .replace(/<(br|\\/p|\\/div|\\/h[1-6]|\\/li|\\/tr|\\/section|\\/article|\\/header|\\/footer|\\/table)[^>]*>/gi, '\\n')\r\n    .replace(/<[^>]+>/g, ' '));\r\n  const out = [];\r\n  for (const line of raw.split('\\n').map((l) => l.replace(/\\s+/g, ' ').trim())) {\r\n    if (!line || line === '-' || line === '##') continue;\r\n    const key = line.toLowerCase();\r\n    if (seen.has(key)) continue;\r\n    seen.add(key);\r\n    out.push(line);\r\n  }\r\n  return { title: decode(title).trim(), desc: decode(desc).trim(), text: out.join('\\n') };\r\n}\r\n\r\n// --- same-site links, most useful pages first\r\nconst SKIP = /\\.(pdf|jpe?g|png|gif|webp|svg|zip|mp4|mp3|docx?|xlsx?|pptx?|css|js|xml|ico|json)$/i;\r\nconst USEFUL = /(about|service|product|price|pricing|plan|package|menu|course|contact|faq|help|support|polic|terms|refund|shipping|delivery|book|appointment|team|location|hour|treatment|portfolio|work)/i;\r\nconst host = (u) => u.hostname.replace(/^www\\./, '');\r\nfunction links(html, base) {\r\n  const found = new Map();\r\n  for (const m of html.matchAll(/href\\s*=\\s*[\"']([^\"'#]+)/gi)) {\r\n    try {\r\n      const u = resolve(decode(m[1]).trim(), base);\r\n      if (!u || host(u) !== host(origin) || SKIP.test(u.pathname)) continue;\r\n      const key = href(u).replace(/\\/$/, '');\r\n      if (!found.has(key)) found.set(key, (USEFUL.test(u.pathname) ? 10 : 0) - u.pathname.split('/').length);\r\n    } catch (e) {}\r\n  }\r\n  return [...found.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);\r\n}\r\nasync function get(url) {\r\n  const html = await helpers.httpRequest({\r\n    method: 'GET', url, timeout: 8000, json: false,\r\n    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteAgentBot/1.0)', Accept: 'text/html,application/xhtml+xml' },\r\n  });\r\n  return typeof html === 'string' ? html.slice(0, 600000) : '';\r\n}\r\n\r\n// --- crawl: home page, then the most useful linked pages, within a time budget\r\nconst pages = [];\r\nif (origin) {\r\n  try {\r\n    const home = await get(href(origin));\r\n    pages.push({ url: href(origin), ...toText(home) });\r\n    const queue = links(home, origin).filter((u) => u !== href(origin).replace(/\\/$/, '')).slice(0, MAX_PAGES - 1);\r\n    for (let i = 0; i < queue.length && Date.now() - started < BUDGET_MS; i += 4) {\r\n      const batch = await Promise.all(queue.slice(i, i + 4).map((u) => get(u).then((h) => ({ url: u, ...toText(h) })).catch(() => null)));\r\n      pages.push(...batch.filter((p) => p && p.text.length > 40));\r\n    }\r\n    if (pages.reduce((n, p) => n + p.text.length, 0) < 300) {\r\n      warnings.push('The website shows very little text to automated visitors (it may be built with heavy JavaScript). Add the details as notes or upload a PDF.');\r\n    }\r\n  } catch (e) {\r\n    warnings.push(`Couldn't open ${href(origin)} (${e.message}). The site may block automated visitors; paste the text as notes or upload a PDF instead.`);\r\n  }\r\n}\r\n\r\n// --- combine: owner notes first (highest priority), then documents, then web pages\r\nlet sources = '';\r\nconst add = (label, text, cap) => {\r\n  const room = TOTAL_CHARS - sources.length;\r\n  if (!text || room < 200) return;\r\n  sources += `\\n\\n### SOURCE: ${label}\\n` + text.slice(0, Math.min(cap, room));\r\n};\r\nadd('Notes from the owner', clean(body.notes), 6000);\r\nfor (const d of (Array.isArray(body.documents) ? body.documents : []).slice(0, 5)) {\r\n  add(`Document \"${clean(d && d.name).slice(0, 80)}\"`, clean(d && d.text), 8000);\r\n}\r\nfor (const p of pages) add(`Web page ${p.url}${p.title ? ' (' + p.title + ')' : ''}`, (p.desc ? p.desc + '\\n' : '') + p.text, PAGE_CHARS);\r\nsources = sources.trim();\r\n\r\nconst ok = sources.length > 50;\r\nreturn [{ json: {\r\n  ok, sources, warnings,\r\n  businessName: clean(body.businessName),\r\n  pagesRead: pages.map((p) => p.url),\r\n  sourceUrl: origin ? href(origin) : '',\r\n  error: ok ? '' : (warnings[0] || 'Give a website, a document or some notes to build the knowledge base from.'),\r\n} }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000059",
+      "name": "Has Sources?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000060",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000061",
+      "name": "Respond No Sources",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error, warnings: $json.warnings }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000062",
+      "name": "Organize Knowledge",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": false,
+        "text": "=You are writing the knowledge base for a website chatbot{{ $json.businessName ? ' for ' + $json.businessName : '' }}. Below are raw sources: notes from the owner, documents, and pages from the business's website.\n\nWrite a clean, well-organized knowledge base in Markdown.\n\nRules:\n- Use ONLY facts found in the sources. Never invent, guess or estimate anything.\n- Keep every concrete detail: service and product names, prices (with currency and notes like \"starting from\", \"per month\", taxes), durations, opening hours, addresses, phone numbers, emails, policies and FAQ answers.\n- If sources conflict, trust owner notes first, then documents, then web pages.\n- Leave out navigation text, cookie notices, slogans, testimonials and repeated content.\n- Use these sections, skipping any with no facts: # <Business name>, ## About, ## Services / Products & Prices, ## How it works, ## Policies (payment, refunds, delivery, cancellation), ## Hours & Location, ## Contact, ## FAQ, ## Other details.\n- At most about 1,200 words.\n\nOutput only the Markdown.\n\nSOURCES:\n{{ $json.sources }}"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000063",
+      "name": "Gemini Knowledge",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        660,
+        120
+      ],
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0,
+          "maxOutputTokens": 2500
+        }
+      },
+      "credentials": {
+        "googlePalmApi": {
+          "id": "SiteAgentGemini1",
+          "name": "SiteAgent Gemini"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000064",
+      "name": "Finalize Knowledge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst src = $('Collect Sources').first().json;\r\nconst ai = String($input.first().json.text || '').trim().replace(/^```(?:markdown|md)?\\s*/i, '').replace(/\\s*```$/, '');\r\nconst warnings = [...src.warnings];\r\nlet knowledge = ai;\r\nif (ai.length < 80) {\r\n  knowledge = src.sources.slice(0, 15000);\r\n  warnings.push('AI organizing was unavailable, so the raw text was used. Please tidy it up before saving.');\r\n}\r\nreturn [{ json: { knowledge, sourceUrl: src.sourceUrl, pagesRead: src.pagesRead, warnings } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000065",
+      "name": "Save Draft",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1120,
+        -100
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_drafts (knowledge, source_url) VALUES ($1, $2) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $json.knowledge, $json.sourceUrl ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "SiteAgentPg00001",
+          "name": "SiteAgent Postgres"
+        }
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000066",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "\r\nconst k = $('Finalize Knowledge').first().json;\r\nconst brief = !!$('Build Knowledge').first().json.query.brief;\r\nconst base = { ok: true, draftId: $input.first().json.id, pagesRead: k.pagesRead, warnings: k.warnings, chars: k.knowledge.length };\r\n// The setup assistant asks for a short version so the whole draft doesn't flood its context.\r\nreturn [{ json: brief ? { ...base, preview: k.knowledge.slice(0, 1500) } : { ...base, knowledge: k.knowledge } }];\r\n  "
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000067",
+      "name": "Respond Draft",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Build Knowledge": {
+      "main": [
+        [
+          {
+            "node": "Collect Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Sources": {
+      "main": [
+        [
+          {
+            "node": "Has Sources?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Sources?": {
+      "main": [
+        [
+          {
+            "node": "Organize Knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Knowledge": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Organize Knowledge",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organize Knowledge": {
+      "main": [
+        [
+          {
+            "node": "Finalize Knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Knowledge": {
+      "main": [
+        [
+          {
+            "node": "Save Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Draft": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

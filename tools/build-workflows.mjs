@@ -99,15 +99,16 @@ const email = (name, pos, p) => ({
   credentials: CRED.smtp,
 });
 // --llm=groq swaps every chat-model node to Groq (free tier allows far more requests per minute than Gemini's).
-const gemini = (name, pos, temperature) => (args.llm === 'groq'
+// maxTokens caps the reply; Groq's free tier rejects requests whose input + max reply exceed its per-minute token limit.
+const gemini = (name, pos, temperature, maxTokens) => (args.llm === 'groq'
   ? {
       id: id(), name: name.replace('Gemini', 'Groq'), type: '@n8n/n8n-nodes-langchain.lmChatGroq', typeVersion: 1, position: pos,
-      parameters: { model: args.model || GROQ_MODEL, options: { temperature } },
+      parameters: { model: args.model || GROQ_MODEL, options: { temperature, ...(maxTokens ? { maxTokensToSample: maxTokens } : {}) } },
       credentials: CRED.groq,
     }
   : {
       id: id(), name, type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini', typeVersion: 1, position: pos,
-      parameters: { modelName: args.model || GEMINI_MODEL, options: { temperature } },
+      parameters: { modelName: args.model || GEMINI_MODEL, options: { temperature, ...(maxTokens ? { maxOutputTokens: maxTokens } : {}) } },
       credentials: CRED.gemini,
     });
 const toPdf = (name, pos) => ({
@@ -559,6 +560,207 @@ FROM i JOIN p ON p.id = i.proposal_id JOIN leads l ON l.id = p.lead_id JOIN busi
 ]);
 
 // =====================================================================
+// 5. Knowledge builder: website + documents + notes -> organized knowledge base draft
+// =====================================================================
+const knowledge = workflow('SiteAgentKnow001', 'SiteAgent 5 - Knowledge Builder', [
+  webhook('Build Knowledge', [0, 0], 'POST', 'build-knowledge'),
+  code('Collect Sources', [220, 0], async function () {
+    const body = $input.first().json.body || {};
+    const helpers = this.helpers;
+    const clean = (v) => String(v ?? '').trim();
+    const MAX_PAGES = 12, PAGE_CHARS = 3000, TOTAL_CHARS = 18000, BUDGET_MS = 25000;
+    const started = Date.now();
+    const warnings = [];
+
+    // --- which website (public sites only: never internal hosts)
+    let start = clean(body.websiteUrl);
+    if (start && !/^https?:\/\//i.test(start)) start = 'https://' + start;
+    // The Code-node sandbox has no URL class, so links are parsed and resolved by hand.
+    function normalizePath(p) {
+      const out = [];
+      for (const seg of p.split('/')) { if (seg === '..') out.pop(); else if (seg !== '.') out.push(seg); }
+      const r = out.join('/');
+      return r.startsWith('/') ? r : '/' + r;
+    }
+    function parseUrl(text) {
+      const m = /^(https?):\/\/([^/?#@]*@)?([^/?#:]+)(:\d*)?([^?#]*)/i.exec(text);
+      if (!m) return null;
+      return { protocol: m[1].toLowerCase(), auth: m[2] || '', hostname: m[3].toLowerCase(), port: m[4] || '', pathname: normalizePath(m[5] || '/') };
+    }
+    function resolve(link, base) {
+      if (/^https?:\/\//i.test(link)) return parseUrl(link);
+      if (/^[a-z][a-z0-9+.-]*:/i.test(link)) return null; // mailto:, tel:, javascript:
+      if (link.startsWith('//')) return parseUrl(base.protocol + ':' + link);
+      const path = link.split(/[?#]/)[0];
+      return { ...base, pathname: normalizePath(path.startsWith('/') ? path : base.pathname.replace(/[^/]*$/, '') + path) };
+    }
+    const href = (u) => `${u.protocol}://${u.hostname}${u.pathname}`;
+
+    let origin = null;
+    if (start) {
+      try {
+        const u = parseUrl(start);
+        if (!u) throw new Error('not a web address');
+        const h = u.hostname;
+        const internal = !h.includes('.') || h.startsWith('[') || /(^localhost$|\.local$|\.internal$)/.test(h)
+          || /^(127|10|0)\./.test(h) || /^(192\.168|169\.254)\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+        if (u.port || u.auth || internal) throw new Error('not allowed');
+        origin = u;
+      } catch (e) {
+        warnings.push('That website address is not valid or not allowed.');
+      }
+    }
+
+    // --- HTML -> plain text, dropping lines already seen on earlier pages (menus, footers)
+    const decode = (s) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(+n))
+      .replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCodePoint(parseInt(n, 16)));
+    const seen = new Set();
+    function toText(html) {
+      const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '';
+      const desc = (html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)/i) || [])[1] || '';
+      const raw = decode(html
+        .replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/<h[1-6][^>]*>/gi, '\n## ')
+        .replace(/<li[^>]*>/gi, '\n- ')
+        .replace(/<\/t[dh]>/gi, ' | ')
+        .replace(/<(br|\/p|\/div|\/h[1-6]|\/li|\/tr|\/section|\/article|\/header|\/footer|\/table)[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, ' '));
+      const out = [];
+      for (const line of raw.split('\n').map((l) => l.replace(/\s+/g, ' ').trim())) {
+        if (!line || line === '-' || line === '##') continue;
+        const key = line.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(line);
+      }
+      return { title: decode(title).trim(), desc: decode(desc).trim(), text: out.join('\n') };
+    }
+
+    // --- same-site links, most useful pages first
+    const SKIP = /\.(pdf|jpe?g|png|gif|webp|svg|zip|mp4|mp3|docx?|xlsx?|pptx?|css|js|xml|ico|json)$/i;
+    const USEFUL = /(about|service|product|price|pricing|plan|package|menu|course|contact|faq|help|support|polic|terms|refund|shipping|delivery|book|appointment|team|location|hour|treatment|portfolio|work)/i;
+    const host = (u) => u.hostname.replace(/^www\./, '');
+    function links(html, base) {
+      const found = new Map();
+      for (const m of html.matchAll(/href\s*=\s*["']([^"'#]+)/gi)) {
+        try {
+          const u = resolve(decode(m[1]).trim(), base);
+          if (!u || host(u) !== host(origin) || SKIP.test(u.pathname)) continue;
+          const key = href(u).replace(/\/$/, '');
+          if (!found.has(key)) found.set(key, (USEFUL.test(u.pathname) ? 10 : 0) - u.pathname.split('/').length);
+        } catch (e) {}
+      }
+      return [...found.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+    }
+    async function get(url) {
+      const html = await helpers.httpRequest({
+        method: 'GET', url, timeout: 8000, json: false,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteAgentBot/1.0)', Accept: 'text/html,application/xhtml+xml' },
+      });
+      return typeof html === 'string' ? html.slice(0, 600000) : '';
+    }
+
+    // --- crawl: home page, then the most useful linked pages, within a time budget
+    const pages = [];
+    if (origin) {
+      try {
+        const home = await get(href(origin));
+        pages.push({ url: href(origin), ...toText(home) });
+        const queue = links(home, origin).filter((u) => u !== href(origin).replace(/\/$/, '')).slice(0, MAX_PAGES - 1);
+        for (let i = 0; i < queue.length && Date.now() - started < BUDGET_MS; i += 4) {
+          const batch = await Promise.all(queue.slice(i, i + 4).map((u) => get(u).then((h) => ({ url: u, ...toText(h) })).catch(() => null)));
+          pages.push(...batch.filter((p) => p && p.text.length > 40));
+        }
+        if (pages.reduce((n, p) => n + p.text.length, 0) < 300) {
+          warnings.push('The website shows very little text to automated visitors (it may be built with heavy JavaScript). Add the details as notes or upload a PDF.');
+        }
+      } catch (e) {
+        warnings.push(`Couldn't open ${href(origin)} (${e.message}). The site may block automated visitors; paste the text as notes or upload a PDF instead.`);
+      }
+    }
+
+    // --- combine: owner notes first (highest priority), then documents, then web pages
+    let sources = '';
+    const add = (label, text, cap) => {
+      const room = TOTAL_CHARS - sources.length;
+      if (!text || room < 200) return;
+      sources += `\n\n### SOURCE: ${label}\n` + text.slice(0, Math.min(cap, room));
+    };
+    add('Notes from the owner', clean(body.notes), 6000);
+    for (const d of (Array.isArray(body.documents) ? body.documents : []).slice(0, 5)) {
+      add(`Document "${clean(d && d.name).slice(0, 80)}"`, clean(d && d.text), 8000);
+    }
+    for (const p of pages) add(`Web page ${p.url}${p.title ? ' (' + p.title + ')' : ''}`, (p.desc ? p.desc + '\n' : '') + p.text, PAGE_CHARS);
+    sources = sources.trim();
+
+    const ok = sources.length > 50;
+    return [{ json: {
+      ok, sources, warnings,
+      businessName: clean(body.businessName),
+      pagesRead: pages.map((p) => p.url),
+      sourceUrl: origin ? href(origin) : '',
+      error: ok ? '' : (warnings[0] || 'Give a website, a document or some notes to build the knowledge base from.'),
+    } }];
+  }),
+  ifTrue('Has Sources?', [440, 0], '={{ $json.ok }}'),
+  respondJson('Respond No Sources', [660, 160], '={{ JSON.stringify({ ok: false, error: $json.error, warnings: $json.warnings }) }}', 400),
+  {
+    id: id(), name: 'Organize Knowledge', type: '@n8n/n8n-nodes-langchain.chainLlm', typeVersion: 1.5, position: [660, -100],
+    onError: 'continueRegularOutput',
+    parameters: {
+      promptType: 'define', hasOutputParser: false,
+      text: `=You are writing the knowledge base for a website chatbot{{ $json.businessName ? ' for ' + $json.businessName : '' }}. Below are raw sources: notes from the owner, documents, and pages from the business's website.
+
+Write a clean, well-organized knowledge base in Markdown.
+
+Rules:
+- Use ONLY facts found in the sources. Never invent, guess or estimate anything.
+- Keep every concrete detail: service and product names, prices (with currency and notes like "starting from", "per month", taxes), durations, opening hours, addresses, phone numbers, emails, policies and FAQ answers.
+- If sources conflict, trust owner notes first, then documents, then web pages.
+- Leave out navigation text, cookie notices, slogans, testimonials and repeated content.
+- Use these sections, skipping any with no facts: # <Business name>, ## About, ## Services / Products & Prices, ## How it works, ## Policies (payment, refunds, delivery, cancellation), ## Hours & Location, ## Contact, ## FAQ, ## Other details.
+- At most about 1,200 words.
+
+Output only the Markdown.
+
+SOURCES:
+{{ $json.sources }}`,
+    },
+  },
+  gemini('Gemini Knowledge', [660, 120], 0, 2500),
+  code('Finalize Knowledge', [900, -100], function () {
+    const src = $('Collect Sources').first().json;
+    const ai = String($input.first().json.text || '').trim().replace(/^```(?:markdown|md)?\s*/i, '').replace(/\s*```$/, '');
+    const warnings = [...src.warnings];
+    let knowledge = ai;
+    if (ai.length < 80) {
+      knowledge = src.sources.slice(0, 15000);
+      warnings.push('AI organizing was unavailable, so the raw text was used. Please tidy it up before saving.');
+    }
+    return [{ json: { knowledge, sourceUrl: src.sourceUrl, pagesRead: src.pagesRead, warnings } }];
+  }),
+  pg('Save Draft', [1120, -100],
+    'INSERT INTO knowledge_drafts (knowledge, source_url) VALUES ($1, $2) RETURNING id',
+    '={{ [ $json.knowledge, $json.sourceUrl ] }}'),
+  code('Build Response', [1340, -100], function () {
+    const k = $('Finalize Knowledge').first().json;
+    const brief = !!$('Build Knowledge').first().json.query.brief;
+    const base = { ok: true, draftId: $input.first().json.id, pagesRead: k.pagesRead, warnings: k.warnings, chars: k.knowledge.length };
+    // The setup assistant asks for a short version so the whole draft doesn't flood its context.
+    return [{ json: brief ? { ...base, preview: k.knowledge.slice(0, 1500) } : { ...base, knowledge: k.knowledge } }];
+  }),
+  respondJson('Respond Draft', [1560, -100], '={{ JSON.stringify($json) }}'),
+], [
+  ['Build Knowledge', 'Collect Sources'], ['Collect Sources', 'Has Sources?'],
+  ['Has Sources?', 'Organize Knowledge', 'main', 0], ['Has Sources?', 'Respond No Sources', 'main', 1],
+  ['Gemini Knowledge', 'Organize Knowledge', 'ai_languageModel'],
+  ['Organize Knowledge', 'Finalize Knowledge'], ['Finalize Knowledge', 'Save Draft'],
+  ['Save Draft', 'Build Response'], ['Build Response', 'Respond Draft'],
+]);
+
+// =====================================================================
 // 4. Business setup: setup page / AI setup assistant -> one-line embed snippet
 // =====================================================================
 const SETUP_TRIGGER = "$('Setup Chat').first().json";
@@ -572,9 +774,13 @@ const SETUP_PROMPT = `=You are the SiteAgent setup assistant. You help business 
 ## How to set one up
 1. Ask which bot type they want. If they are unsure, recommend the AI Assistant.
 2. Collect: business name, and the owner email (where leads and proposals will be sent).
-3. For the AI Assistant only, collect the knowledge base: services and prices, process and timelines, policies (payment, refunds, delivery), hours and contact details. Let them paste it or describe it. Organize what they give you into clear sections, using only facts they stated. Never invent prices, services or policies; if something important is missing, ask once and move on if they skip it.
-4. Show a short summary (type, name, email, and for the AI Assistant a few lines of the knowledge base) and ask them to confirm.
-5. After they confirm, call \`create_assistant\` exactly once.
+3. For the AI Assistant only, build the knowledge base:
+   - Ask for their website link. If they have one, call \`import_website\` with it. Tell them how many pages you read and summarize what you learned in 3-5 bullet points (main services, prices, hours, contact). Mention any warnings.
+   - Then ask whether anything is missing or wrong (prices not on the site, discounts, policies, timings). Their answers become extra notes.
+   - If they have no website, or it could not be read, collect the details in chat: services and prices, process and timelines, policies, hours and contact. For brochures or price-list PDFs, point them to the setup form (setup.html), which can read documents.
+   - Never invent prices, services or policies.
+4. Show a short summary (type, name, email, and for the AI Assistant what the knowledge base covers) and ask them to confirm.
+5. After they confirm, call \`create_assistant\` exactly once. If you used \`import_website\`, pass its draftId and put only the extra notes in knowledge; otherwise put the full organized knowledge in knowledge.
 6. On success, reply with:
    - the \`snippet\` from the tool result inside an \`\`\`html code block, copied EXACTLY, character for character;
    - "Paste this just before </body> on every page where the chat should appear.";
@@ -599,6 +805,8 @@ const setup = workflow('SiteAgentSetup01', 'SiteAgent 4 - Business Setup', [
       businessId: s(b.businessId), editKey: s(b.editKey),
       name: s(b.name), ownerEmail: s(b.ownerEmail).toLowerCase(), knowledge: s(b.knowledge),
       botType: ['ai', 'inquiry', 'lead'].includes(s(b.botType)) ? s(b.botType) : 'ai',
+      // A knowledge base built by the Knowledge Builder; knowledge then holds only extra notes.
+      draftId: /^[0-9a-f]{32}$/.test(s(b.draftId)) ? s(b.draftId) : '',
       // Where the setup page / assistant is hosted; embed.js is served from the same folder.
       siteUrl: /^https?:\/\/[^\s"'<>]+$/.test(s(b.siteUrl)) ? s(b.siteUrl).replace(/\/+$/, '') : '',
     };
@@ -610,22 +818,28 @@ const setup = workflow('SiteAgentSetup01', 'SiteAgent 4 - Business Setup', [
     const errors = [];
     if (out.name.length < 2) errors.push('Business name is required.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');
-    if (out.botType === 'ai' && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');
+    if (out.botType === 'ai' && !out.draftId && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');
     if (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');
     return [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];
   }),
   ifTrue('Valid?', [440, 0], '={{ $json.valid }}'),
   pg('Upsert Business', [660, -80],
-    `WITH upd AS (
-  UPDATE businesses SET name = $2, owner_email = $3, knowledge = $4, bot_type = $7, updated_at = now()
-  WHERE $6 = 'update' AND id = $1 AND edit_key = $5 RETURNING *
+    `WITH d AS (SELECT knowledge FROM knowledge_drafts WHERE id = $8),
+kb AS (
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM d)
+    THEN (SELECT knowledge FROM d) || CASE WHEN $4 <> '' THEN E'\\n\\n## Additional notes from the owner\\n' || $4 ELSE '' END
+    ELSE $4 END AS k
+),
+upd AS (
+  UPDATE businesses SET name = $2, owner_email = $3, knowledge = (SELECT k FROM kb), bot_type = $7, updated_at = now()
+  WHERE $6 = 'update' AND id = $1 AND edit_key = $5 AND ($7 <> 'ai' OR length((SELECT k FROM kb)) >= 80) RETURNING *
 ),
 ins AS (
   INSERT INTO businesses (id, name, owner_email, knowledge, bot_type)
-  SELECT $1, $2, $3, $4, $7 WHERE $6 = 'create' RETURNING *
+  SELECT $1, $2, $3, (SELECT k FROM kb), $7 WHERE $6 = 'create' AND ($7 <> 'ai' OR length((SELECT k FROM kb)) >= 80) RETURNING *
 )
 SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key, bot_type FROM ins`,
-    '={{ [ $json.businessId, $json.name, $json.ownerEmail, $json.knowledge, $json.editKey, $json.mode, $json.botType ] }}',
+    '={{ [ $json.businessId, $json.name, $json.ownerEmail, $json.knowledge, $json.editKey, $json.mode, $json.botType, $json.draftId ] }}',
     { alwaysOutputData: true }),
   ifTrue('Saved?', [880, -80], '={{ !!$json.id }}'),
   code('Build Snippet', [1100, -160], function () {
@@ -646,7 +860,7 @@ SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key
     return [{ json: { ok: true, businessId: b.id, editKey: b.edit_key, name: b.name, botType: b.bot_type, snippet, previewUrl } }];
   }),
   respondJson('Respond Saved', [1320, -160], '={{ JSON.stringify($json) }}'),
-  respondJson('Respond Not Saved', [1100, 40], "={{ JSON.stringify({ ok: false, error: 'Business not found or edit key is wrong.' }) }}", 403),
+  respondJson('Respond Not Saved', [1100, 40], "={{ JSON.stringify({ ok: false, error: 'Not saved: the Business ID or edit key is wrong, or the knowledge draft was not found.' }) }}", 403),
   respondJson('Respond Invalid', [660, 120], '={{ JSON.stringify({ ok: false, error: $json.error }) }}', 400),
 
   webhook('Get Business', [0, 360], 'GET', 'get-business'),
@@ -682,12 +896,27 @@ SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key
         { name: 'botType', value: "={{ $fromAI('botType', 'One of: ai, inquiry, lead', 'string') }}" },
         { name: 'name', value: "={{ $fromAI('name', 'Business name', 'string') }}" },
         { name: 'ownerEmail', value: "={{ $fromAI('ownerEmail', 'Owner email where leads and proposals go', 'string') }}" },
-        { name: 'knowledge', value: "={{ $fromAI('knowledge', 'Knowledge base for the AI Assistant, organized in sections using only facts the owner gave. Empty string for inquiry/lead bots.', 'string') }}" },
+        { name: 'knowledge', value: "={{ $fromAI('knowledge', 'With a draftId: only the extra notes the owner added, or empty. Without a draftId: the full knowledge base organized in sections using only facts the owner gave. Empty string for inquiry/lead bots.', 'string') }}" },
+        { name: 'draftId', value: "={{ $fromAI('draftId', 'draftId returned by import_website, otherwise empty string', 'string') }}" },
         { name: 'businessId', value: "={{ $fromAI('businessId', 'Existing Business ID when updating, otherwise empty string', 'string') }}" },
         { name: 'editKey', value: "={{ $fromAI('editKey', 'Edit key when updating, otherwise empty string', 'string') }}" },
         { name: 'siteUrl', value: `={{ (${SETUP_TRIGGER}.metadata || {}).siteUrl || '' }}` },
       ] },
       options: { response: { response: { neverError: true } } },
+    },
+  },
+  {
+    id: id(), name: 'import_website', type: 'n8n-nodes-base.httpRequestTool', typeVersion: 4.2, position: [620, 880],
+    parameters: {
+      descriptionType: 'manual',
+      toolDescription: "Read a business's website and build a knowledge base draft from it. Takes about 30 seconds. Returns {ok, draftId, pagesRead, warnings, preview} or {ok:false, error}.",
+      method: 'POST', url: 'http://localhost:5678/webhook/build-knowledge?brief=1',
+      sendBody: true,
+      bodyParameters: { parameters: [
+        { name: 'websiteUrl', value: "={{ $fromAI('websiteUrl', 'The business website address the owner gave', 'string') }}" },
+        { name: 'businessName', value: "={{ $fromAI('businessName', 'Business name if known, otherwise empty string', 'string') }}" },
+      ] },
+      options: { timeout: 90000, response: { response: { neverError: true } } },
     },
   },
 ], [
@@ -700,12 +929,13 @@ SELECT id, name, edit_key, bot_type FROM upd UNION ALL SELECT id, name, edit_key
   ['Gemini Setup', 'Setup Assistant', 'ai_languageModel'],
   ['Setup Memory', 'Setup Assistant', 'ai_memory'],
   ['create_assistant', 'Setup Assistant', 'ai_tool'],
+  ['import_website', 'Setup Assistant', 'ai_tool'],
 ]);
 
 // ---------- hosted-n8n variant ----------
 // A hosted n8n has no Docker siblings (postgres, gotenberg, mailpit), usually blocks $env,
 // and may be shared, so webhook paths get a personal prefix to avoid clashes.
-const PATHS = ['siteagent-setup-chat', 'siteagent-chat', 'capture-lead', 'proposal-form', 'proposal-submit', 'accept-proposal', 'save-business', 'get-business'];
+const PATHS = ['build-knowledge', 'siteagent-setup-chat', 'siteagent-chat', 'capture-lead', 'proposal-form', 'proposal-submit', 'accept-proposal', 'save-business', 'get-business'];
 function toCloud(wf) {
   const base = String(args['base-url']).replace(/\/+$/, '');
   const prefix = typeof args.prefix === 'string' ? args.prefix : '';
@@ -723,7 +953,7 @@ function toCloud(wf) {
     .split("$env.GENERIC_TIMEZONE || 'UTC'").join(`'${tz}'`)
     .split('{{ $env.SITEAGENT_FROM_EMAIL }}').join(args.from)
     .split('http://gotenberg:3000/forms/chromium/convert/html').join(pdfUrl);
-  if (/\$env|localhost|gotenberg:3000/.test(s)) throw new Error(`${wf.name}: local-only reference left in cloud build`);
+  if (/\$env|https?:\/\/localhost|gotenberg:3000/.test(s)) throw new Error(`${wf.name}: local-only reference left in cloud build`);
   return { ...JSON.parse(s), name: wf.name + (prefix ? ` (${prefix.replace(/-$/, '')})` : '') };
 }
 
@@ -748,10 +978,10 @@ function mergeAll(parts) {
   return merged;
 }
 
-const parts = [['Chat', chat], ['Leads', leads], ['Deals', proposals], ['Setup', setup]];
+const parts = [['Chat', chat], ['Leads', leads], ['Deals', proposals], ['Setup', setup], ['Knowledge', knowledge]];
 const files = args.single
   ? [['siteagent-all-in-one.json', mergeAll(parts)]]
-  : [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup]];
+  : [['1-chat-agent.json', chat], ['2-leads.json', leads], ['3-proposals-invoices.json', proposals], ['4-business-setup.json', setup], ['5-knowledge-builder.json', knowledge]];
 for (const [file, wf] of files) {
   const out = CLOUD ? toCloud(wf) : wf;
   writeFileSync(join(OUT, file), JSON.stringify(out, null, 2) + '\n');

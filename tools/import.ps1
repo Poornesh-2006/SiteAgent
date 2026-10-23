@@ -14,6 +14,7 @@ if (-not $SkipCredentials) {
 $ids = @{
   '1-chat-agent' = 'SiteAgentChat001'; '2-leads' = 'SiteAgentLeads01'
   '3-proposals-invoices' = 'SiteAgentDeals01'; '4-business-setup' = 'SiteAgentSetup01'
+  '5-knowledge-builder' = 'SiteAgentKnow001'
 }
 foreach ($f in $ids.Keys) {
   docker exec siteagent-n8n n8n import:workflow --input=/import/workflows/$f.json

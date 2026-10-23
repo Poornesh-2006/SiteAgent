@@ -56,6 +56,14 @@ CREATE TABLE invoices (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Knowledge bases built from a website / documents / notes, waiting for the owner to review.
+CREATE TABLE knowledge_drafts (
+  id          TEXT PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+  knowledge   TEXT NOT NULL,
+  source_url  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Demo business used by the sample website (site/index.html)
 INSERT INTO businesses (id, name, owner_email, knowledge, edit_key) VALUES (
   'pixelcraft',
@@ -101,3 +109,4 @@ ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_drafts ENABLE ROW LEVEL SECURITY;

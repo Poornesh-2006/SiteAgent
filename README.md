@@ -21,14 +21,15 @@ Visitor ──chat──► AI agent (answers ONLY from the business's knowledge
                                      invoice PDF ─► client (owner CC'd), lead marked "won"
 ```
 
-## The four workflows
+## The five workflows
 
 | # | Workflow | Webhooks | What it does |
 |---|----------|----------|--------------|
 | 1 | Chat Agent | `siteagent-chat/chat` | Looks up the business by `businessId`, injects its full knowledge base into the agent, keeps per-visitor memory, calls `capture_lead` |
 | 2 | Lead Capture & Scoring | `POST capture-lead` | Validates, scores 0–100 with Gemini against the business's services, saves, emails owner, auto-replies to hot leads |
 | 3 | Proposals & Invoices | `GET proposal-form`, `POST proposal-submit`, `GET accept-proposal` | Owner's proposal form → PDF → client email → one-click accept → invoice PDF |
-| 4 | Business Setup | `POST save-business`, `GET get-business` | Any business can register, write its knowledge base and get its embed snippet; edit later with an edit key |
+| 4 | Business Setup | `POST save-business`, `GET get-business`, setup chat | Setup form + AI setup assistant: pick a bot type, build the knowledge base, get the one-line snippet; edit later with an edit key |
+| 5 | Knowledge Builder | `POST build-knowledge` | Reads the owner's website, documents and notes, and has the AI organize them into a knowledge base draft |
 
 ### How a business owner gets a chatbot
 1. Open **`assistant.html`**, the AI setup assistant (like AgentOps), and chat: *"I need a chatbot for my bakery."* Or use the **`setup.html`** form.
@@ -43,6 +44,14 @@ Visitor ──chat──► AI agent (answers ONLY from the business's knowledge
    <script src="https://YOUR-SITE/embed.js" data-business="..." data-type="ai" data-chat="..." data-lead="..." defer></script>
    ```
 4. To change details later, give the assistant (or the form) the Business ID and Edit key.
+
+### Building the knowledge base from what the owner already has
+The AI Assistant is only as good as its knowledge base, so owners don't have to type it out. The **Knowledge Builder** (`POST build-knowledge`) combines:
+- 🌐 **their website**: the home page plus up to 11 of the most useful linked pages (services, pricing, about, contact, FAQ…), cleaned of menus and repeated footers. Only public sites; internal addresses are blocked.
+- 📄 **documents**: brochure, price list or menu as PDF/text (read in the browser on `setup.html`).
+- ✍️ **extra notes**: anything not on the site. Notes beat documents, and documents beat web pages, when they disagree.
+
+The AI organizes it into sections (services & prices, policies, hours, contact, FAQ) using only facts from the sources. The owner reviews and edits the draft before saving. The setup assistant does the same in chat: share your website link, and it reads the site and asks what's missing.
 
 ### Why answers stay accurate
 Each business's knowledge base is fetched **by ID on every message** and given to the agent in full, with strict rules: answer only from it, quote prices exactly, say "I don't know" and offer a follow-up instead of guessing, and refuse off-topic questions. For small-business knowledge bases (up to tens of pages) this is more reliable than vector search, which can retrieve the wrong chunk. Businesses are isolated: one business's facts never reach another's assistant. `tools/test-agent.mjs` checks this.
