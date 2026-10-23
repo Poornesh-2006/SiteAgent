@@ -93,3 +93,10 @@ Hours: Monday-Saturday, 10am-7pm IST
 $kb$,
   'demo-edit-key'
 );
+
+-- Supabase exposes the public schema through its REST API. RLS with no policies
+-- blocks that API; n8n connects as the table owner, which bypasses RLS.
+ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
