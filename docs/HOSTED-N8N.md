@@ -27,7 +27,11 @@ node tools/build-workflows.mjs --cloud --base-url=https://YOUR-N8N-HOST --from=y
 
 This writes 4 files to `workflows-cloud/`. Optional flags: `--tz=Asia/Kolkata`, `--pdf-url=https://your-gotenberg/forms/chromium/convert/html`.
 
-**Limited publish slots?** (e.g. "Publish 0/3"): add `--single` to get one `siteagent-all-in-one.json` with all four flows. That's one import and one publish. In step 5, import just that file.
+**Limited publish slots?** (e.g. "Publish 0/3"): add `--single` to get **two** files: `siteagent-all-in-one.json` (the bot, leads, proposals, setup and knowledge builder) and `siteagent-setup-assistant.json` (the AI setup assistant). n8n allows only one chat trigger per workflow, which is why the assistant is separate. That's two imports and two publish slots.
+
+**Using Groq?** Add `--llm=groq`. Conversations use `openai/gpt-oss-120b` and background jobs (website organizing, lead scoring) use `openai/gpt-oss-20b`, because Groq's free tier limits tokens per minute *per model*.
+
+**Test before importing:** `node tools/portal-test.mjs` builds the same files pointed at your local Docker n8n with local credentials attached (`workflows/portal-test/`), so you can import and test them locally first.
 
 ## 4. Create 3 credentials in n8n
 Go to **Overview → Credentials → Create**:

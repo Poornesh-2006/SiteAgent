@@ -32,7 +32,10 @@ const CRED = {
 // gemini-2.5-flash works for keys created before Google retired it for new users;
 // newer keys need a newer model, e.g. --model=models/gemini-3.8-flash
 const GEMINI_MODEL = 'models/gemini-2.5-flash';
-const GROQ_MODEL = 'openai/gpt-oss-120b'; // tested live: 8/8 accuracy, reliable tool calls
+const GROQ_MODEL = 'openai/gpt-oss-120b'; // conversations: tested live, 8/8 accuracy, reliable tool calls
+// Background jobs (website organizing, lead scoring) use a second model: Groq's free tier limits
+// tokens per minute per model, so this keeps them from starving the conversations.
+const GROQ_BACKGROUND_MODEL = 'openai/gpt-oss-20b';
 
 // ---------- helpers ----------
 let uid = 0;
@@ -42,9 +45,15 @@ const body = (fn) => {
   return s.slice(s.indexOf('{') + 1, s.lastIndexOf('}')).replace(/^\n/, '').replace(/^ {4}/gm, '');
 };
 
+// --llm=groq renames the "Geminiâ€¦" model nodes, so edges are renamed the same way.
+const modelName = (n) => (args.llm === 'groq' ? n.replace(/^Gemini/, 'Groq') : n);
+
 function workflow(wfId, name, nodes, edges) {
   const connections = {};
-  for (const [from, to, type = 'main', fromIndex = 0] of edges) {
+  const names = new Set(nodes.map((n) => n.name));
+  for (const [rawFrom, to, type = 'main', fromIndex = 0] of edges) {
+    const from = modelName(rawFrom);
+    for (const n of [from, to]) if (!names.has(n)) throw new Error(`${name}: connection references missing node "${n}"`);
     const c = (connections[from] ??= {});
     const list = (c[type] ??= []);
     while (list.length <= fromIndex) list.push([]);
@@ -100,10 +109,10 @@ const email = (name, pos, p) => ({
 });
 // --llm=groq swaps every chat-model node to Groq (free tier allows far more requests per minute than Gemini's).
 // maxTokens caps the reply; Groq's free tier rejects requests whose input + max reply exceed its per-minute token limit.
-const gemini = (name, pos, temperature, maxTokens) => (args.llm === 'groq'
+const gemini = (name, pos, temperature, maxTokens, background = false) => (args.llm === 'groq'
   ? {
-      id: id(), name: name.replace('Gemini', 'Groq'), type: '@n8n/n8n-nodes-langchain.lmChatGroq', typeVersion: 1, position: pos,
-      parameters: { model: args.model || GROQ_MODEL, options: { temperature, ...(maxTokens ? { maxTokensToSample: maxTokens } : {}) } },
+      id: id(), name: modelName(name), type: '@n8n/n8n-nodes-langchain.lmChatGroq', typeVersion: 1, position: pos,
+      parameters: { model: args.model || (background ? GROQ_BACKGROUND_MODEL : GROQ_MODEL), options: { temperature, ...(maxTokens ? { maxTokensToSample: maxTokens } : {}) } },
       credentials: CRED.groq,
     }
   : {
@@ -150,8 +159,8 @@ Your job: answer visitors' questions about the business accurately, and turn int
 - Politely decline topics unrelated to the business.
 
 ## Lead capture
-When a visitor wants a quote, a proposal, a call, to buy, or to start a project — or when you could not answer and they want a follow-up:
-1. Ask for what is missing, one or two items per message: name, email, what they need. Phone and budget/timeline are optional — ask once, don't insist.
+When a visitor wants a quote, a proposal, a call, to buy, or to start a project â€” or when you could not answer and they want a follow-up:
+1. Ask for what is missing, one or two items per message: name, email, what they need. Phone and budget/timeline are optional â€” ask once, don't insist.
 2. As soon as you have name + a valid-looking email + their requirement, call the \`capture_lead\` tool exactly once with everything they told you.
 3. If the tool returns ok, tell them the team will email them within one business day. If it returns an error, explain the problem (e.g. invalid email) and ask them to correct it.
 Never call \`capture_lead\` with made-up details.`;
@@ -237,7 +246,7 @@ const leads = workflow('SiteAgentLeads01', 'SiteAgent 2 - Lead Capture & Scoring
       promptType: 'define', hasOutputParser: false,
       text: `=You qualify sales leads for {{ $json.name }}. Here is what the business offers:
 ---
-{{ $json.knowledge }}
+{{ $json.knowledge || '(No service list was provided. Score Fit as 25 of 40, and do not mention a missing service list in the reason.)' }}
 ---
 
 Lead:
@@ -258,7 +267,7 @@ Reply with ONLY a JSON object, no markdown fences:
 {"score": <number>, "reason": "<one short sentence>", "suggested_service": "<exact service name from the list, or 'Custom / unclear'>"}`,
     },
   },
-  gemini('Gemini', [1100, 120], 0),
+  gemini('Gemini', [1100, 120], 0, 1000, true),
   code('Parse Score', [1340, -100], function () {
     const lead = $('Validate Lead').first().json;
     const biz = $('Load Business').first().json;
@@ -286,7 +295,7 @@ RETURNING id, token`,
     const base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';
     return [{ json: {
       ...lead, lead_id: saved.id,
-      emoji: { hot: '🔥', warm: '🌤️', cold: '❄️' }[lead.tier],
+      emoji: { hot: 'ðŸ”¥', warm: 'ðŸŒ¤ï¸', cold: 'â„ï¸' }[lead.tier],
       first_name: lead.name.split(' ')[0],
       proposal_link: `${base}/webhook/proposal-form?lead=${saved.id}&k=${saved.token}`,
     } }];
@@ -297,24 +306,24 @@ RETURNING id, token`,
     replyTo: '={{ $json.email }}',
     subject: "={{ $json.emoji }} {{ $json.tier.toUpperCase() }} lead ({{ $json.score }}/100): {{ $json.name }}",
     html: `=<div style="font-family:Arial,sans-serif;max-width:560px">
-<h2 style="margin:0 0 4px">{{ $json.emoji }} New {{ $json.tier }} lead — {{ $json.score }}/100</h2>
+<h2 style="margin:0 0 4px">{{ $json.emoji }} New {{ $json.tier }} lead â€” {{ $json.score }}/100</h2>
 <p style="color:#555;margin:0 0 16px">{{ $json.reason }}<br><b>Suggested service:</b> {{ $json.suggested_service }}</p>
 <table cellpadding="8" style="border-collapse:collapse;width:100%;font-size:14px">
 <tr style="background:#f6f6f8"><td width="140"><b>Name</b></td><td>{{ $json.name }}</td></tr>
 <tr><td><b>Email</b></td><td><a href="mailto:{{ $json.email }}">{{ $json.email }}</a></td></tr>
-<tr style="background:#f6f6f8"><td><b>Phone</b></td><td>{{ $json.phone || '—' }}</td></tr>
+<tr style="background:#f6f6f8"><td><b>Phone</b></td><td>{{ $json.phone || 'â€”' }}</td></tr>
 <tr><td><b>Requirement</b></td><td>{{ $json.requirement }}</td></tr>
-<tr style="background:#f6f6f8"><td><b>Budget / timeline</b></td><td>{{ $json.budget || '—' }}</td></tr>
+<tr style="background:#f6f6f8"><td><b>Budget / timeline</b></td><td>{{ $json.budget || 'â€”' }}</td></tr>
 </table>
-<p style="margin:24px 0"><a href="{{ $json.proposal_link }}" style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">Create proposal →</a></p>
-<p style="color:#999;font-size:12px">Lead #{{ $json.lead_id }} · captured by SiteAgent on your website</p>
+<p style="margin:24px 0"><a href="{{ $json.proposal_link }}" style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">Create proposal â†’</a></p>
+<p style="color:#999;font-size:12px">Lead #{{ $json.lead_id }} Â· captured by SiteAgent on your website</p>
 </div>`,
   }),
   ifTrue('Is Hot?', [2220, 40], "={{ $json.tier === 'hot' }}"),
   email('Auto-Reply Customer', [2440, 20], {
     to: '={{ $json.email }}',
     replyTo: '={{ $json.owner_email }}',
-    subject: '=Thanks {{ $json.first_name }} — next steps with {{ $json.business_name }}',
+    subject: '=Thanks {{ $json.first_name }} â€” next steps with {{ $json.business_name }}',
     html: `=<div style="font-family:Arial,sans-serif;max-width:560px;line-height:1.5">
 <p>Hi {{ $json.first_name }},</p>
 <p>Thanks for reaching out to <b>{{ $json.business_name }}</b>! We've received your request:</p>
@@ -397,14 +406,14 @@ WHERE l.id = $1 AND l.token = $2`,
     "={{ [ Number($json.query.lead) || 0, String($json.query.k || '') ] }}", { alwaysOutputData: true }),
   code('Render Form', [440, 0], withShell(pageShell, function () {
     const l = $input.first().json;
-    if (!l.id) return [{ json: { html: message('🔒', 'Link not valid', 'This proposal link is invalid or has expired.') } }];
+    if (!l.id) return [{ json: { html: message('ðŸ”’', 'Link not valid', 'This proposal link is invalid or has expired.') } }];
     const base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';
     const already = l.status !== 'new'
-      ? `<p style="background:#fff7e0;padding:10px;border-radius:8px">⚠️ A proposal was already sent for this lead (status: ${esc(l.status)}). Submitting again sends a new one.</p>` : '';
-    const html = page('Create proposal', `<h1>Create proposal</h1><p class="muted">${esc(l.business_name)} · Lead #${l.id}</p>${already}
-<div class="lead"><b>${esc(l.name)}</b> · ${esc(l.email)}${l.phone ? ' · ' + esc(l.phone) : ''}<br>
-<b>Needs:</b> ${esc(l.requirement)}<br><b>Budget/timeline:</b> ${esc(l.budget || '—')}<br>
-<b>AI score:</b> ${l.score}/100 (${esc(l.tier)}) — ${esc(l.reason)}</div>
+      ? `<p style="background:#fff7e0;padding:10px;border-radius:8px">âš ï¸ A proposal was already sent for this lead (status: ${esc(l.status)}). Submitting again sends a new one.</p>` : '';
+    const html = page('Create proposal', `<h1>Create proposal</h1><p class="muted">${esc(l.business_name)} Â· Lead #${l.id}</p>${already}
+<div class="lead"><b>${esc(l.name)}</b> Â· ${esc(l.email)}${l.phone ? ' Â· ' + esc(l.phone) : ''}<br>
+<b>Needs:</b> ${esc(l.requirement)}<br><b>Budget/timeline:</b> ${esc(l.budget || 'â€”')}<br>
+<b>AI score:</b> ${l.score}/100 (${esc(l.tier)}) â€” ${esc(l.reason)}</div>
 <form method="POST" action="${base}/webhook/proposal-submit">
 <input type="hidden" name="lead" value="${l.id}"><input type="hidden" name="k" value="${esc(l.token)}">
 <label>Title</label><input name="title" required value="${esc(l.suggested_service !== 'Custom / unclear' ? l.suggested_service : '')}">
@@ -464,7 +473,7 @@ FROM p JOIN l ON l.id = p.lead_id JOIN businesses b ON b.id = l.business_id`,
       `<b>Next step:</b> to accept this proposal, click the <b>Accept proposal</b> button in the email it came with. Your invoice will be issued automatically.<br>Questions? Reply to the email and we'll get back to you.`);
     return [{ json: { ...j, number, accept_link, total_fmt: fmt(j.total, j.currency), first_name: j.client_name.split(' ')[0] }, binary: asHtmlFile(html) }];
   })),
-  toPdf('Proposal → PDF', [1320, 140]),
+  toPdf('Proposal â†’ PDF', [1320, 140]),
   code('Attach Proposal', [1540, 140], function () {
     const j = $('Build Proposal PDF').first().json;
     const bin = $input.first().binary.data;
@@ -474,23 +483,23 @@ FROM p JOIN l ON l.id = p.lead_id JOIN businesses b ON b.id = l.business_id`,
   }),
   email('Email Proposal', [1760, 140], {
     to: '={{ $json.client_email }}', cc: '={{ $json.owner_email }}', replyTo: '={{ $json.owner_email }}', attach: true,
-    subject: '=Your proposal from {{ $json.business_name }} — {{ $json.title }} ({{ $json.number }})',
+    subject: '=Your proposal from {{ $json.business_name }} â€” {{ $json.title }} ({{ $json.number }})',
     html: `=<div style="font-family:Arial,sans-serif;max-width:560px;line-height:1.5">
 <p>Hi {{ $json.first_name }},</p>
 <p>Thanks for your time! Please find our proposal for <b>{{ $json.title }}</b> attached.</p>
-<p style="font-size:18px"><b>Total: {{ $json.total_fmt }}</b> <span style="color:#666;font-size:14px">(incl. GST · {{ $json.payment_terms }})</span></p>
-<p style="margin:24px 0"><a href="{{ $json.accept_link }}" style="background:#16a34a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">✓ Accept proposal</a></p>
+<p style="font-size:18px"><b>Total: {{ $json.total_fmt }}</b> <span style="color:#666;font-size:14px">(incl. GST Â· {{ $json.payment_terms }})</span></p>
+<p style="margin:24px 0"><a href="{{ $json.accept_link }}" style="background:#16a34a;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">âœ“ Accept proposal</a></p>
 <p>Accepting will automatically issue your invoice. Have questions or want changes? Just reply to this email.</p>
 <p>Best regards,<br>{{ $json.business_name }}</p></div>`,
   }),
   code('Sent Page', [1980, 140], withShell(pageShell, function () {
     const j = $('Build Proposal PDF').first().json;
-    return [{ json: { html: message('📨', 'Proposal sent', `${j.number} (${j.total_fmt}) was emailed to ${j.client_email} with an Accept button. You were CC'd.`) } }];
+    return [{ json: { html: message('ðŸ“¨', 'Proposal sent', `${j.number} (${j.total_fmt}) was emailed to ${j.client_email} with an Accept button. You were CC'd.`) } }];
   })),
   respondHtml('Show Sent', [2200, 140], '={{ $json.html }}'),
   code('Error Page', [1100, 400], withShell(pageShell, function () {
     const err = $('Validate Proposal').first().json.error || 'This proposal link is invalid.';
-    return [{ json: { html: message('⚠️', 'Could not create proposal', err) } }];
+    return [{ json: { html: message('âš ï¸', 'Could not create proposal', err) } }];
   })),
   respondHtml('Show Error', [1320, 400], '={{ $json.html }}', 400),
 
@@ -519,7 +528,7 @@ FROM i JOIN p ON p.id = i.proposal_id JOIN leads l ON l.id = p.lead_id JOIN busi
       `<b>Payment due by ${d(j.due_date)}.</b> Please quote <b>${number}</b> with your payment. Reply to the invoice email for bank / UPI details or any questions.<br>Thank you for your business!`);
     return [{ json: { ...j, number, total_fmt: fmt(j.total, j.currency), due_fmt: d(j.due_date), first_name: j.client_name.split(' ')[0] }, binary: asHtmlFile(html) }];
   })),
-  toPdf('Invoice → PDF', [880, 620]),
+  toPdf('Invoice â†’ PDF', [880, 620]),
   code('Attach Invoice', [1100, 620], function () {
     const j = $('Build Invoice PDF').first().json;
     const bin = $input.first().binary.data;
@@ -529,21 +538,21 @@ FROM i JOIN p ON p.id = i.proposal_id JOIN leads l ON l.id = p.lead_id JOIN busi
   }),
   email('Email Invoice', [1320, 620], {
     to: '={{ $json.client_email }}', cc: '={{ $json.owner_email }}', replyTo: '={{ $json.owner_email }}', attach: true,
-    subject: '=Invoice {{ $json.number }} from {{ $json.business_name }} — {{ $json.total_fmt }}',
+    subject: '=Invoice {{ $json.number }} from {{ $json.business_name }} â€” {{ $json.total_fmt }}',
     html: `=<div style="font-family:Arial,sans-serif;max-width:560px;line-height:1.5">
 <p>Hi {{ $json.first_name }},</p>
-<p>Thank you for accepting our proposal for <b>{{ $json.title }}</b> — we're excited to get started!</p>
+<p>Thank you for accepting our proposal for <b>{{ $json.title }}</b> â€” we're excited to get started!</p>
 <p>Your invoice <b>{{ $json.number }}</b> for <b>{{ $json.total_fmt }}</b> is attached, due on <b>{{ $json.due_fmt }}</b>.</p>
 <p>Reply to this email for payment details or any questions.</p>
 <p>Best regards,<br>{{ $json.business_name }}</p></div>`,
   }),
   code('Thank-You Page', [1540, 620], withShell(pageShell, function () {
     const j = $('Build Invoice PDF').first().json;
-    return [{ json: { html: message('🎉', 'Proposal accepted!', `Thanks ${j.first_name}! Invoice ${j.number} (${j.total_fmt}, due ${j.due_fmt}) has been emailed to ${j.client_email}.`) } }];
+    return [{ json: { html: message('ðŸŽ‰', 'Proposal accepted!', `Thanks ${j.first_name}! Invoice ${j.number} (${j.total_fmt}, due ${j.due_fmt}) has been emailed to ${j.client_email}.`) } }];
   })),
   respondHtml('Show Thanks', [1760, 620], '={{ $json.html }}'),
   code('Not Found Page', [660, 820], withShell(pageShell, function () {
-    return [{ json: { html: message('ℹ️', 'Nothing to accept', 'This proposal has already been accepted, or the link is invalid. Check your inbox for the invoice, or reply to the proposal email.') } }];
+    return [{ json: { html: message('â„¹ï¸', 'Nothing to accept', 'This proposal has already been accepted, or the link is invalid. Check your inbox for the invoice, or reply to the proposal email.') } }];
   })),
   respondHtml('Show Not Found', [880, 820], '={{ $json.html }}', 404),
 ], [
@@ -551,11 +560,11 @@ FROM i JOIN p ON p.id = i.proposal_id JOIN leads l ON l.id = p.lead_id JOIN busi
   ['Proposal Submit', 'Validate Proposal'], ['Validate Proposal', 'Valid?'],
   ['Valid?', 'Save Proposal', 'main', 0], ['Valid?', 'Error Page', 'main', 1],
   ['Save Proposal', 'Saved?'], ['Saved?', 'Build Proposal PDF', 'main', 0], ['Saved?', 'Error Page', 'main', 1],
-  ['Build Proposal PDF', 'Proposal → PDF'], ['Proposal → PDF', 'Attach Proposal'], ['Attach Proposal', 'Email Proposal'],
+  ['Build Proposal PDF', 'Proposal â†’ PDF'], ['Proposal â†’ PDF', 'Attach Proposal'], ['Attach Proposal', 'Email Proposal'],
   ['Email Proposal', 'Sent Page'], ['Sent Page', 'Show Sent'], ['Error Page', 'Show Error'],
   ['Accept Proposal', 'Mark Accepted + Create Invoice'], ['Mark Accepted + Create Invoice', 'Accepted?'],
   ['Accepted?', 'Build Invoice PDF', 'main', 0], ['Accepted?', 'Not Found Page', 'main', 1],
-  ['Build Invoice PDF', 'Invoice → PDF'], ['Invoice → PDF', 'Attach Invoice'], ['Attach Invoice', 'Email Invoice'],
+  ['Build Invoice PDF', 'Invoice â†’ PDF'], ['Invoice â†’ PDF', 'Attach Invoice'], ['Attach Invoice', 'Email Invoice'],
   ['Email Invoice', 'Thank-You Page'], ['Thank-You Page', 'Show Thanks'], ['Not Found Page', 'Show Not Found'],
 ]);
 
@@ -568,7 +577,7 @@ const knowledge = workflow('SiteAgentKnow001', 'SiteAgent 5 - Knowledge Builder'
     const body = $input.first().json.body || {};
     const helpers = this.helpers;
     const clean = (v) => String(v ?? '').trim();
-    const MAX_PAGES = 12, PAGE_CHARS = 3000, TOTAL_CHARS = 18000, BUDGET_MS = 25000;
+    const MAX_PAGES = 12, PAGE_CHARS = 2500, TOTAL_CHARS = 15000, BUDGET_MS = 25000; // ~3.8k tokens: fits Groq's 8k/min with the reply
     const started = Date.now();
     const warnings = [];
 
@@ -717,6 +726,7 @@ Write a clean, well-organized knowledge base in Markdown.
 
 Rules:
 - Use ONLY facts found in the sources. Never invent, guess or estimate anything.
+- Don't add general knowledge, "standard practice" or assumptions, and don't write notes about what the sources leave out. If a topic isn't covered, simply leave it out.
 - Keep every concrete detail: service and product names, prices (with currency and notes like "starting from", "per month", taxes), durations, opening hours, addresses, phone numbers, emails, policies and FAQ answers.
 - If sources conflict, trust owner notes first, then documents, then web pages.
 - Leave out navigation text, cookie notices, slogans, testimonials and repeated content.
@@ -729,7 +739,7 @@ SOURCES:
 {{ $json.sources }}`,
     },
   },
-  gemini('Gemini Knowledge', [660, 120], 0, 2500),
+  gemini('Gemini Knowledge', [660, 120], 0, 3800, true),
   code('Finalize Knowledge', [900, -100], function () {
     const src = $('Collect Sources').first().json;
     const ai = String($input.first().json.text || '').trim().replace(/^```(?:markdown|md)?\s*/i, '').replace(/\s*```$/, '');
@@ -749,7 +759,7 @@ SOURCES:
     const brief = !!$('Build Knowledge').first().json.query.brief;
     const base = { ok: true, draftId: $input.first().json.id, pagesRead: k.pagesRead, warnings: k.warnings, chars: k.knowledge.length };
     // The setup assistant asks for a short version so the whole draft doesn't flood its context.
-    return [{ json: brief ? { ...base, preview: k.knowledge.slice(0, 1500) } : { ...base, knowledge: k.knowledge } }];
+    return [{ json: brief ? { ...base, preview: k.knowledge.slice(0, 2500) } : { ...base, knowledge: k.knowledge } }];
   }),
   respondJson('Respond Draft', [1560, -100], '={{ JSON.stringify($json) }}'),
 ], [
@@ -767,9 +777,9 @@ const SETUP_TRIGGER = "$('Setup Chat').first().json";
 const SETUP_PROMPT = `=You are the SiteAgent setup assistant. You help business owners add a chatbot with business automation to their website, and you give them a ready-to-paste snippet.
 
 ## Bot types we offer
-1. 🤖 **AI Assistant** (recommended): answers visitors' questions from the business's own knowledge base (services, prices, policies), captures interested visitors as leads, AI-scores each lead, and lets the owner send a proposal PDF in one click. When the customer accepts, the invoice PDF is sent automatically.
-2. 💼 **Business Inquiry bot**: a simple guided chat that asks the visitor for name, email and enquiry. The owner gets an email with a "Create proposal" button, then proposal PDF -> customer accepts -> invoice, all automatic.
-3. 📊 **Lead Capture bot**: a guided chat that asks for name, mobile, email and requirement. Each lead is AI-scored (hot/warm/cold); the owner is notified and hot leads get an automatic reply.
+1. ðŸ¤– **AI Assistant** (recommended): answers visitors' questions from the business's own knowledge base (services, prices, policies), captures interested visitors as leads, AI-scores each lead, and lets the owner send a proposal PDF in one click. When the customer accepts, the invoice PDF is sent automatically.
+2. ðŸ’¼ **Business Inquiry bot**: a simple guided chat that asks the visitor for name, email and enquiry. The owner gets an email with a "Create proposal" button, then proposal PDF -> customer accepts -> invoice, all automatic.
+3. ðŸ“Š **Lead Capture bot**: a guided chat that asks for name, mobile, email and requirement. Each lead is AI-scored (hot/warm/cold); the owner is notified and hot leads get an automatic reply.
 
 ## How to set one up
 1. Ask which bot type they want. If they are unsure, recommend the AI Assistant.
@@ -794,7 +804,7 @@ Ask for the Business ID and Edit key, then the new details, then call \`create_a
 ## Rules
 - Keep replies short (under 6 lines) except when giving the snippet.
 - If asked how it works, explain the flow of the relevant bot type as a short numbered list.
-- Only discuss SiteAgent, chatbots and business automation. For anything else, reply: "I can only help with setting up your SiteAgent chatbot and automations 😊 Which would you like: an AI Assistant, a Business Inquiry bot, or a Lead Capture bot?"`;
+- Only discuss SiteAgent, chatbots and business automation. For anything else, reply: "I can only help with setting up your SiteAgent chatbot and automations ðŸ˜Š Which would you like: an AI Assistant, a Business Inquiry bot, or a Lead Capture bot?"`;
 
 const setup = workflow('SiteAgentSetup01', 'SiteAgent 4 - Business Setup', [
   webhook('Save Business', [0, 0], 'POST', 'save-business'),
@@ -818,7 +828,7 @@ const setup = workflow('SiteAgentSetup01', 'SiteAgent 4 - Business Setup', [
     const errors = [];
     if (out.name.length < 2) errors.push('Business name is required.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(out.ownerEmail)) errors.push('A valid owner email is required.');
-    if (out.botType === 'ai' && !out.draftId && out.knowledge.length < 80) errors.push('Knowledge base is too short — describe your services, prices and policies (at least a few lines).');
+    if (out.botType === 'ai' && !out.draftId && out.knowledge.length < 80) errors.push('Knowledge base is too short â€” describe your services, prices and policies (at least a few lines).');
     if (out.knowledge.length > 60000) errors.push('Knowledge base is too long (max 60,000 characters).');
     return [{ json: { ...out, valid: errors.length === 0, error: errors.join(' ') } }];
   }),

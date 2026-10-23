@@ -31,7 +31,7 @@
         0
       ],
       "parameters": {
-        "jsCode": "const b = $input.first().json.body || {};\nconst clean = (v) => String(v ?? '').trim();\nconst lead = {\n  business_id: clean(b.business_id) || 'pixelcraft',\n  name: clean(b.name),\n  email: clean(b.email).toLowerCase(),\n  phone: clean(b.phone),\n  requirement: clean(b.requirement),\n  budget: clean(b.budget),\n};\nconst errors = [];\nif (lead.name.length < 2) errors.push('name is missing');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(lead.email)) errors.push('email address looks invalid');\nif (lead.requirement.length < 5) errors.push('requirement is missing');\nreturn [{ json: { ...lead, valid: errors.length === 0, error: errors.join('; ') } }];\n  "
+        "jsCode": "\r\nconst b = $input.first().json.body || {};\r\nconst clean = (v) => String(v ?? '').trim();\r\nconst lead = {\r\n  business_id: clean(b.business_id) || 'pixelcraft',\r\n  name: clean(b.name),\r\n  email: clean(b.email).toLowerCase(),\r\n  phone: clean(b.phone),\r\n  requirement: clean(b.requirement),\r\n  budget: clean(b.budget),\r\n};\r\nconst errors = [];\r\nif (lead.name.length < 2) errors.push('name is missing');\r\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(lead.email)) errors.push('email address looks invalid');\r\nif (lead.requirement.length < 5) errors.push('requirement is missing');\r\nreturn [{ json: { ...lead, valid: errors.length === 0, error: errors.join('; ') } }];\r\n  "
       }
     },
     {
@@ -171,7 +171,7 @@
       "parameters": {
         "promptType": "define",
         "hasOutputParser": false,
-        "text": "=You qualify sales leads for {{ $json.name }}. Here is what the business offers:\n---\n{{ $json.knowledge }}\n---\n\nLead:\n- Name: {{ $('Validate Lead').first().json.name }}\n- Email: {{ $('Validate Lead').first().json.email }}\n- Phone: {{ $('Validate Lead').first().json.phone || 'not given' }}\n- Requirement: {{ $('Validate Lead').first().json.requirement }}\n- Budget/timeline: {{ $('Validate Lead').first().json.budget || 'not given' }}\n\nScore the lead 0-100:\n- Fit (0-40): does the requirement match a service the business actually offers?\n- Clarity (0-20): is the need specific?\n- Budget (0-20): is the stated budget realistic for the matching service's listed price? Unknown budget = 8.\n- Urgency (0-10): clear timeline or intent to start soon?\n- Contact (0-10): phone given = 10, email only = 5.\n\nReply with ONLY a JSON object, no markdown fences:\n{\"score\": <number>, \"reason\": \"<one short sentence>\", \"suggested_service\": \"<exact service name from the list, or 'Custom / unclear'>\"}"
+        "text": "=You qualify sales leads for {{ $json.name }}. Here is what the business offers:\n---\n{{ $json.knowledge || '(No service list was provided. Score Fit as 25 of 40, and do not mention a missing service list in the reason.)' }}\n---\n\nLead:\n- Name: {{ $('Validate Lead').first().json.name }}\n- Email: {{ $('Validate Lead').first().json.email }}\n- Phone: {{ $('Validate Lead').first().json.phone || 'not given' }}\n- Requirement: {{ $('Validate Lead').first().json.requirement }}\n- Budget/timeline: {{ $('Validate Lead').first().json.budget || 'not given' }}\n\nScore the lead 0-100:\n- Fit (0-40): does the requirement match a service the business actually offers?\n- Clarity (0-20): is the need specific?\n- Budget (0-20): is the stated budget realistic for the matching service's listed price? Unknown budget = 8.\n- Urgency (0-10): clear timeline or intent to start soon?\n- Contact (0-10): phone given = 10, email only = 5.\n\nReply with ONLY a JSON object, no markdown fences:\n{\"score\": <number>, \"reason\": \"<one short sentence>\", \"suggested_service\": \"<exact service name from the list, or 'Custom / unclear'>\"}"
       }
     },
     {
@@ -186,7 +186,8 @@
       "parameters": {
         "modelName": "models/gemini-2.5-flash",
         "options": {
-          "temperature": 0
+          "temperature": 0,
+          "maxOutputTokens": 1000
         }
       },
       "credentials": {
@@ -206,7 +207,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "const lead = $('Validate Lead').first().json;\nconst biz = $('Load Business').first().json;\nconst raw = $input.first().json.text || '';\nlet ai = {};\ntry { ai = JSON.parse((raw.match(/\\{[\\s\\S]*\\}/) || ['{}'])[0]); } catch (e) {}\nconst scored = Number.isFinite(Number(ai.score));\nconst score = scored ? Math.max(0, Math.min(100, Math.round(Number(ai.score)))) : 50;\nconst tier = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';\nreturn [{ json: {\n  ...lead, score, tier,\n  reason: scored ? String(ai.reason || '') : 'AI scoring unavailable - defaulted to warm.',\n  suggested_service: String(ai.suggested_service || 'Custom / unclear'),\n  business_name: biz.name, owner_email: biz.owner_email,\n} }];\n  "
+        "jsCode": "\r\nconst lead = $('Validate Lead').first().json;\r\nconst biz = $('Load Business').first().json;\r\nconst raw = $input.first().json.text || '';\r\nlet ai = {};\r\ntry { ai = JSON.parse((raw.match(/\\{[\\s\\S]*\\}/) || ['{}'])[0]); } catch (e) {}\r\nconst scored = Number.isFinite(Number(ai.score));\r\nconst score = scored ? Math.max(0, Math.min(100, Math.round(Number(ai.score)))) : 50;\r\nconst tier = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';\r\nreturn [{ json: {\r\n  ...lead, score, tier,\r\n  reason: scored ? String(ai.reason || '') : 'AI scoring unavailable - defaulted to warm.',\r\n  suggested_service: String(ai.suggested_service || 'Custom / unclear'),\r\n  business_name: biz.name, owner_email: biz.owner_email,\r\n} }];\r\n  "
       }
     },
     {
@@ -242,7 +243,7 @@
         -100
       ],
       "parameters": {
-        "jsCode": "const lead = $('Parse Score').first().json;\nconst saved = $input.first().json;\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\nreturn [{ json: {\n  ...lead, lead_id: saved.id,\n  emoji: { hot: '🔥', warm: '🌤️', cold: '❄️' }[lead.tier],\n  first_name: lead.name.split(' ')[0],\n  proposal_link: `${base}/webhook/proposal-form?lead=${saved.id}&k=${saved.token}`,\n} }];\n  "
+        "jsCode": "\r\nconst lead = $('Parse Score').first().json;\r\nconst saved = $input.first().json;\r\nconst base = $env.SITEAGENT_PUBLIC_URL || 'http://localhost:5678';\r\nreturn [{ json: {\r\n  ...lead, lead_id: saved.id,\r\n  emoji: { hot: 'ðŸ”¥', warm: 'ðŸŒ¤ï¸', cold: 'â„ï¸' }[lead.tier],\r\n  first_name: lead.name.split(' ')[0],\r\n  proposal_link: `${base}/webhook/proposal-form?lead=${saved.id}&k=${saved.token}`,\r\n} }];\r\n  "
       }
     },
     {
@@ -276,7 +277,7 @@
         "toEmail": "={{ $json.owner_email }}",
         "subject": "={{ $json.emoji }} {{ $json.tier.toUpperCase() }} lead ({{ $json.score }}/100): {{ $json.name }}",
         "emailFormat": "html",
-        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:560px\">\n<h2 style=\"margin:0 0 4px\">{{ $json.emoji }} New {{ $json.tier }} lead — {{ $json.score }}/100</h2>\n<p style=\"color:#555;margin:0 0 16px\">{{ $json.reason }}<br><b>Suggested service:</b> {{ $json.suggested_service }}</p>\n<table cellpadding=\"8\" style=\"border-collapse:collapse;width:100%;font-size:14px\">\n<tr style=\"background:#f6f6f8\"><td width=\"140\"><b>Name</b></td><td>{{ $json.name }}</td></tr>\n<tr><td><b>Email</b></td><td><a href=\"mailto:{{ $json.email }}\">{{ $json.email }}</a></td></tr>\n<tr style=\"background:#f6f6f8\"><td><b>Phone</b></td><td>{{ $json.phone || '—' }}</td></tr>\n<tr><td><b>Requirement</b></td><td>{{ $json.requirement }}</td></tr>\n<tr style=\"background:#f6f6f8\"><td><b>Budget / timeline</b></td><td>{{ $json.budget || '—' }}</td></tr>\n</table>\n<p style=\"margin:24px 0\"><a href=\"{{ $json.proposal_link }}\" style=\"background:#4f46e5;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold\">Create proposal →</a></p>\n<p style=\"color:#999;font-size:12px\">Lead #{{ $json.lead_id }} · captured by SiteAgent on your website</p>\n</div>",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:560px\">\n<h2 style=\"margin:0 0 4px\">{{ $json.emoji }} New {{ $json.tier }} lead â€” {{ $json.score }}/100</h2>\n<p style=\"color:#555;margin:0 0 16px\">{{ $json.reason }}<br><b>Suggested service:</b> {{ $json.suggested_service }}</p>\n<table cellpadding=\"8\" style=\"border-collapse:collapse;width:100%;font-size:14px\">\n<tr style=\"background:#f6f6f8\"><td width=\"140\"><b>Name</b></td><td>{{ $json.name }}</td></tr>\n<tr><td><b>Email</b></td><td><a href=\"mailto:{{ $json.email }}\">{{ $json.email }}</a></td></tr>\n<tr style=\"background:#f6f6f8\"><td><b>Phone</b></td><td>{{ $json.phone || 'â€”' }}</td></tr>\n<tr><td><b>Requirement</b></td><td>{{ $json.requirement }}</td></tr>\n<tr style=\"background:#f6f6f8\"><td><b>Budget / timeline</b></td><td>{{ $json.budget || 'â€”' }}</td></tr>\n</table>\n<p style=\"margin:24px 0\"><a href=\"{{ $json.proposal_link }}\" style=\"background:#4f46e5;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold\">Create proposal â†’</a></p>\n<p style=\"color:#999;font-size:12px\">Lead #{{ $json.lead_id }} Â· captured by SiteAgent on your website</p>\n</div>",
         "options": {
           "replyTo": "={{ $json.email }}"
         }
@@ -333,7 +334,7 @@
       "parameters": {
         "fromEmail": "={{ $json.business_name }} <{{ $env.SITEAGENT_FROM_EMAIL }}>",
         "toEmail": "={{ $json.email }}",
-        "subject": "=Thanks {{ $json.first_name }} — next steps with {{ $json.business_name }}",
+        "subject": "=Thanks {{ $json.first_name }} â€” next steps with {{ $json.business_name }}",
         "emailFormat": "html",
         "html": "=<div style=\"font-family:Arial,sans-serif;max-width:560px;line-height:1.5\">\n<p>Hi {{ $json.first_name }},</p>\n<p>Thanks for reaching out to <b>{{ $json.business_name }}</b>! We've received your request:</p>\n<blockquote style=\"border-left:3px solid #4f46e5;margin:0;padding:4px 12px;color:#444\">{{ $json.requirement }}</blockquote>\n<p>Someone from our team will email you within one business day with next steps. If you'd like to speed things up, just reply to this email with a couple of times that suit you for a quick call.</p>\n<p>Cheers,<br>The {{ $json.business_name }} team</p>\n</div>",
         "options": {
